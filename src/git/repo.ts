@@ -11,6 +11,7 @@ import type {
 
 /**
  * Initializes a new git repository at the specified path.
+ * Sets the default branch to "main" for consistency across platforms.
  *
  * @param repoPath - Absolute path to the directory where the repo will be initialized
  * @throws Error if the directory does not exist
@@ -23,7 +24,9 @@ export async function initRepo(repoPath: string): Promise<void> {
 		throw new Error(`Directory does not exist: ${repoPath}`);
 	}
 
-	await simpleGit(repoPath).init();
+	// Use -b main to ensure consistent branch name across platforms
+	// (some systems default to "master")
+	await simpleGit(repoPath).init(["--initial-branch=main"]);
 }
 
 /**
