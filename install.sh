@@ -16,6 +16,7 @@ err()   { printf '\033[1;31mError: %s\033[0m\n' "$*" >&2; exit 1; }
 
 command -v git  >/dev/null 2>&1 || err "git is required but not installed"
 command -v node >/dev/null 2>&1 || err "Node.js is required but not installed"
+command -v npm  >/dev/null 2>&1 || err "npm is required but not installed"
 
 NODE_MAJOR=$(node -e 'process.stdout.write(process.versions.node.split(".")[0])')
 if [ "$NODE_MAJOR" -lt 22 ]; then
@@ -24,9 +25,10 @@ fi
 
 # ── install ────────────────────────────────────────────────────────
 
-if [ -d "$INSTALL_DIR" ]; then
+if [ -d "$INSTALL_DIR/.git" ]; then
   info "Updating existing installation in $INSTALL_DIR..."
-  git -C "$INSTALL_DIR" pull --ff-only
+  git -C "$INSTALL_DIR" fetch --depth 1 origin main
+  git -C "$INSTALL_DIR" reset --hard origin/main
 else
   info "Cloning claude-sync into $INSTALL_DIR..."
   git clone --depth 1 "https://github.com/$REPO.git" "$INSTALL_DIR"
@@ -42,11 +44,12 @@ info "Building..."
 
 info "Creating symlink..."
 
-# Try /usr/local/bin first, fall back to ~/bin
+# Try /usr/local/bin first, fall back to ~/.local/bin
 if [ -w "$(dirname "$BIN_LINK")" ] || [ -w "$BIN_LINK" ] 2>/dev/null; then
   ln -sf "$INSTALL_DIR/dist/cli.js" "$BIN_LINK"
   ok "Linked claude-sync -> $BIN_LINK"
-elif command -v sudo >/dev/null 2>&1; then
+elif [ -t 0 ] && command -v sudo >/dev/null 2>&1; then
+  # Only use sudo when running interactively (not piped)
   sudo ln -sf "$INSTALL_DIR/dist/cli.js" "$BIN_LINK"
   ok "Linked claude-sync -> $BIN_LINK (via sudo)"
 else
