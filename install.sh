@@ -16,15 +16,25 @@ warn()  { printf '\033[1;33m%s\033[0m\n' "$*"; }
 err()   { printf '\033[1;31mError: %s\033[0m\n' "$*" >&2; exit 1; }
 
 # Read user input — works even when script is piped via curl | bash
+# Returns the value via stdout; caller captures with $()
 prompt() {
-  local var="$1" msg="$2" default="$3"
+  local msg="$1" default="$2" reply=""
+  if [ ! -e /dev/tty ]; then
+    # No tty available (headless/Docker) — use default silently
+    echo "$default"
+    return
+  fi
   if [ -n "$default" ]; then
     printf '%s [%s]: ' "$msg" "$default" >/dev/tty
   else
     printf '%s: ' "$msg" >/dev/tty
   fi
-  read -r "$var" </dev/tty || true
-  eval "[ -z \"\$$var\" ] && $var=\"$default\""
+  read -r reply </dev/tty || true
+  if [ -z "$reply" ]; then
+    echo "$default"
+  else
+    echo "$reply"
+  fi
 }
 
 # ── preflight ──────────────────────────────────────────────────────
@@ -132,9 +142,17 @@ if ! gh auth status >/dev/null 2>&1; then
 fi
 
 GH_USER=$(gh api user --jq '.login' 2>/dev/null) || GH_USER=""
+if [ -z "$GH_USER" ]; then
+  warn "Could not determine GitHub username — skipping automatic repo creation."
+  echo "  claude-sync init"
+  echo "  cd ~/.claude-sync && git remote add origin <repo-url>"
+  echo "  claude-sync push"
+  echo ""
+  exit 0
+fi
 
-prompt REPO_NAME "Repository name" "$DEFAULT_REPO_NAME"
-prompt REPO_VISIBILITY "Visibility (private/public)" "private"
+REPO_NAME=$(prompt "Repository name" "$DEFAULT_REPO_NAME")
+REPO_VISIBILITY=$(prompt "Visibility (private/public)" "private")
 
 # Validate visibility
 case "$REPO_VISIBILITY" in
@@ -144,11 +162,7 @@ case "$REPO_VISIBILITY" in
 esac
 
 echo ""
-if [ -n "$GH_USER" ]; then
-  info "Creating $REPO_VISIBILITY repo: $GH_USER/$REPO_NAME"
-else
-  info "Creating $REPO_VISIBILITY repo: $REPO_NAME"
-fi
+info "Creating $REPO_VISIBILITY repo: $GH_USER/$REPO_NAME"
 
 if gh repo create "$REPO_NAME" --"$REPO_VISIBILITY" --description "Claude Code config synced by claude-sync" 2>/dev/null; then
   ok "GitHub repo created"
@@ -157,12 +171,7 @@ else
   warn "Could not create repo (may already exist). Continuing..."
 fi
 
-# Resolve the full repo URL
-if [ -n "$GH_USER" ]; then
-  REMOTE_URL="git@github.com:$GH_USER/$REPO_NAME.git"
-else
-  REMOTE_URL="git@github.com:$REPO_NAME.git"
-fi
+REMOTE_URL="git@github.com:$GH_USER/$REPO_NAME.git"
 
 # Run claude-sync init
 info "Initializing sync repo..."
