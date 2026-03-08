@@ -2,6 +2,17 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 /**
+ * Normalizes a relative path by converting all backslashes to forward slashes.
+ * Ensures consistent POSIX-style paths regardless of the source platform.
+ *
+ * @param relativePath - The path to normalize
+ * @returns Path with all backslashes replaced by forward slashes
+ */
+export function normalizePath(relativePath: string): string {
+	return relativePath.replaceAll("\\", "/");
+}
+
+/**
  * Returns the user's home directory.
  */
 export function getHomeDir(): string {

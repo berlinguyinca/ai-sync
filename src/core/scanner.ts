@@ -1,5 +1,6 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import { normalizePath } from "../platform/paths.js";
 import { isPathAllowed } from "./manifest.js";
 
 /**
@@ -30,7 +31,9 @@ export async function scanDirectory(sourceDir: string): Promise<string[]> {
 
 		// Build relative path from the entry
 		// entry.parentPath is absolute, so we compute relative from sourceDir
-		const relativePath = path.relative(sourceDir, path.join(entry.parentPath, entry.name));
+		const relativePath = normalizePath(
+			path.relative(sourceDir, path.join(entry.parentPath, entry.name)),
+		);
 
 		if (isPathAllowed(relativePath)) {
 			allowedFiles.push(relativePath);

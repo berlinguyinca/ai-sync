@@ -79,4 +79,17 @@ describe("scanner", () => {
 		expect(result).toContain("agents/baz/deep/nested.md");
 		expect(result).toContain("hooks/pre-commit.sh");
 	});
+
+	it("returns forward-slash relative paths (cross-platform contract)", async () => {
+		await createFile("agents/skill/SKILL.md", "skill");
+		await createFile("hooks/pre-push.sh", "#!/bin/bash");
+
+		const result = await scanDirectory(tmpDir);
+		for (const p of result) {
+			expect(p).not.toContain("\\");
+			expect(path.isAbsolute(p)).toBe(false);
+		}
+		expect(result).toContain("agents/skill/SKILL.md");
+		expect(result).toContain("hooks/pre-push.sh");
+	});
 });
