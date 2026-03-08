@@ -61,7 +61,7 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 03-01-PLAN.md -- Cross-platform path normalization (normalizePath utility, scanner fix, path-rewriter enhancement)
+- [x] 03-01-PLAN.md -- Cross-platform path normalization (normalizePath utility, scanner fix, path-rewriter enhancement)
 - [ ] 03-02-PLAN.md -- Bootstrap command (clone remote repo, apply files to ~/.claude, backup existing config)
 
 ## Progress
@@ -72,5 +72,5 @@ Phases execute in numeric order: 1 -> 2 -> 3
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation | 2/2 | Complete | 2026-03-08 |
-| 2. Sync Operations | 0/2 | Not started | - |
-| 3. Cross-Platform and Bootstrap | 0/2 | Not started | - |
+| 2. Sync Operations | 2/2 | Complete | 2026-03-08 |
+| 3. Cross-Platform and Bootstrap | 1/2 | In progress | - |
