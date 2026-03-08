@@ -100,36 +100,8 @@ install_node() {
     err "No Node.js version manager (fnm/nvm) or Homebrew found, and curl is not available to download Node.js. Install Node.js 22+ manually."
   fi
 
-  # 4. Try apt (Debian/Ubuntu) via NodeSource
-  if command -v apt-get >/dev/null 2>&1; then
-    info "Installing Node.js $NODE_VERSION via apt (NodeSource)..."
-    if command -v sudo >/dev/null 2>&1; then
-      curl -fsSL "https://deb.nodesource.com/setup_${NODE_VERSION}.x" | sudo -E bash -
-      sudo apt-get install -y nodejs
-    else
-      curl -fsSL "https://deb.nodesource.com/setup_${NODE_VERSION}.x" | bash -
-      apt-get install -y nodejs
-    fi
-    return 0
-  fi
-
-  # 5. Try yum/dnf (RHEL/Fedora/CentOS) via NodeSource
-  if command -v dnf >/dev/null 2>&1 || command -v yum >/dev/null 2>&1; then
-    local pkg_mgr="yum"
-    command -v dnf >/dev/null 2>&1 && pkg_mgr="dnf"
-    info "Installing Node.js $NODE_VERSION via $pkg_mgr (NodeSource)..."
-    if command -v sudo >/dev/null 2>&1; then
-      curl -fsSL "https://rpm.nodesource.com/setup_${NODE_VERSION}.x" | sudo bash -
-      sudo $pkg_mgr install -y nodejs
-    else
-      curl -fsSL "https://rpm.nodesource.com/setup_${NODE_VERSION}.x" | bash -
-      $pkg_mgr install -y nodejs
-    fi
-    return 0
-  fi
-
-  # 6. Last resort: download official binary
-  info "No package manager found. Downloading Node.js $NODE_VERSION binary..."
+  # 4. Download official binary (no root required, most reliable)
+  info "Downloading Node.js $NODE_VERSION binary from nodejs.org..."
   local arch os_name
   arch=$(uname -m)
   os_name=$(uname -s | tr '[:upper:]' '[:lower:]')
