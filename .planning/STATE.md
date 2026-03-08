@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: completed
-stopped_at: Completed 01-02-PLAN.md
-last_updated: "2026-03-08T19:56:54.505Z"
-last_activity: 2026-03-08 -- Completed Plan 01-02 (Git Wrapper, CLI, Init Command)
+stopped_at: Completed 02-01-PLAN.md
+last_updated: "2026-03-08T20:17:24.705Z"
+last_activity: 2026-03-08 -- Completed Plan 02-01 (Sync Infrastructure)
 progress:
   total_phases: 3
   completed_phases: 1
-  total_plans: 2
-  completed_plans: 2
-  percent: 100
+  total_plans: 4
+  completed_plans: 3
+  percent: 75
 ---
 
 # Project State
@@ -21,32 +21,33 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-08)
 
 **Core value:** Changes to the Claude environment on any machine automatically propagate to all other machines -- zero manual sync effort.
-**Current focus:** Phase 1 complete. Next: Phase 2 (Sync Operations)
+**Current focus:** Phase 2 in progress. Plan 02-01 complete, Plan 02-02 next.
 
 ## Current Position
 
-Phase: 1 of 3 (Foundation) -- COMPLETE
-Plan: 2 of 2 in current phase
-Status: Phase 1 complete, ready for Phase 2
-Last activity: 2026-03-08 -- Completed Plan 01-02 (Git Wrapper, CLI, Init Command)
+Phase: 2 of 3 (Sync Operations)
+Plan: 1 of 2 in current phase
+Status: Plan 02-01 complete, ready for Plan 02-02 (CLI Commands)
+Last activity: 2026-03-08 -- Completed Plan 02-01 (Sync Infrastructure)
 
-Progress: [██████████] 100%
+Progress: [████████░░] 75%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 2
-- Average duration: 3.5 min
-- Total execution time: 7 min
+- Total plans completed: 3
+- Average duration: 4 min
+- Total execution time: 12 min
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 1. Foundation | 2/2 | 7 min | 3.5 min |
+| 2. Sync Operations | 1/2 | 5 min | 5 min |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (3 min), 01-02 (4 min)
+- Last 5 plans: 01-01 (3 min), 01-02 (4 min), 02-01 (5 min)
 - Trend: stable
 
 *Updated after each plan completion*
@@ -66,6 +67,9 @@ Recent decisions affecting current work:
 - [Phase 01-02]: Derived homeDir from claudeDir parent instead of os.homedir() for correct path rewriting
 - [Phase 01-02]: Extracted handleInit() from Commander action handler for direct testability
 - [Phase 01-02]: Used named import { simpleGit } for Node16 module resolution compatibility
+- [Phase 02-01]: Set upstream tracking in fetch tests for accurate ahead/behind reporting
+- [Phase 02-01]: Used scanDirectory for both source and destination to ensure consistent allowlisting
+- [Phase 02-01]: Backup stored alongside sync repo in .claude-sync-backups directory
 
 ### Pending Todos
 
@@ -77,6 +81,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-08T19:52:12.004Z
-Stopped at: Completed 01-02-PLAN.md
+Last session: 2026-03-08T20:17:24.703Z
+Stopped at: Completed 02-01-PLAN.md
 Resume file: None

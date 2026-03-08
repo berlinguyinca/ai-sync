@@ -11,9 +11,9 @@ Requirements for initial release. Each maps to roadmap phases.
 
 - [x] **SYNC-01**: User can initialize a git repo from existing ~/.claude config with one command
 - [x] **SYNC-02**: Tool ships with Claude-aware default manifest (allowlist of ~8 sync targets, excludes ~18 ephemeral items)
-- [ ] **SYNC-03**: User can push local config changes to remote with one command
-- [ ] **SYNC-04**: User can pull remote changes and apply them to local ~/.claude with one command
-- [ ] **SYNC-05**: User can view sync status (local changes, remote drift, excluded items)
+- [x] **SYNC-03**: User can push local config changes to remote with one command
+- [x] **SYNC-04**: User can pull remote changes and apply them to local ~/.claude with one command
+- [x] **SYNC-05**: User can view sync status (local changes, remote drift, excluded items)
 
 ### Setup
 
@@ -22,9 +22,9 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Safety
 
-- [ ] **SAFE-01**: Tool backs up current ~/.claude state before applying remote changes
+- [x] **SAFE-01**: Tool backs up current ~/.claude state before applying remote changes
 - [x] **SAFE-02**: Tool rewrites absolute paths in settings.json to portable tokens (~/.claude/...) in the repo, expands on apply
-- [ ] **SAFE-03**: Tool reports sync health/errors clearly after each operation
+- [x] **SAFE-03**: Tool reports sync health/errors clearly after each operation
 
 ## v2 Requirements
 
@@ -68,14 +68,14 @@ Which phases cover which requirements. Updated during roadmap creation.
 |-------------|-------|--------|
 | SYNC-01 | Phase 1 | Complete |
 | SYNC-02 | Phase 1 | Complete |
-| SYNC-03 | Phase 2 | Pending |
-| SYNC-04 | Phase 2 | Pending |
-| SYNC-05 | Phase 2 | Pending |
+| SYNC-03 | Phase 2 | Complete |
+| SYNC-04 | Phase 2 | Complete |
+| SYNC-05 | Phase 2 | Complete |
 | SETUP-01 | Phase 3 | Pending |
 | SETUP-02 | Phase 3 | Pending |
-| SAFE-01 | Phase 2 | Pending |
+| SAFE-01 | Phase 2 | Complete |
 | SAFE-02 | Phase 1 | Complete |
-| SAFE-03 | Phase 2 | Pending |
+| SAFE-03 | Phase 2 | Complete |
 
 **Coverage:**
 - v1 requirements: 10 total
