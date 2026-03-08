@@ -25,5 +25,5 @@ const isDirectRun =
 	(process.argv[1].endsWith("/cli/index.ts") || process.argv[1].endsWith("/cli.js"));
 
 if (isDirectRun) {
-	program.parse();
+	program.parseAsync();
 }
