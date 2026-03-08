@@ -92,6 +92,9 @@ fi
 echo ""
 ok "claude-sync installed successfully!"
 
+# Use the built binary directly — symlink may not be in PATH yet
+CLAUDE_SYNC="node $INSTALL_DIR/dist/cli.js"
+
 # ── setup sync repo ───────────────────────────────────────────────
 
 # Skip setup if sync repo already exists (update flow)
@@ -185,13 +188,13 @@ REMOTE_URL="git@github.com:$GH_USER/$REPO_NAME.git"
 
 # Run claude-sync init
 info "Initializing sync repo..."
-claude-sync init
+$CLAUDE_SYNC init
 
 # Add remote and push
 info "Adding remote and pushing..."
 git -C "$SYNC_DIR" remote add origin "$REMOTE_URL" 2>/dev/null || \
   git -C "$SYNC_DIR" remote set-url origin "$REMOTE_URL"
-claude-sync push
+$CLAUDE_SYNC push
 
 echo ""
 ok "All done! Your config is synced to $REMOTE_URL"
