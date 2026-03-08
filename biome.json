@@ -1,5 +1,5 @@
 {
-	"$schema": "https://biomejs.dev/schemas/2.0.0/schema.json",
+	"$schema": "https://biomejs.dev/schemas/2.4.6/schema.json",
 	"formatter": {
 		"indentStyle": "tab",
 		"lineWidth": 100
@@ -9,10 +9,8 @@
 			"recommended": true
 		}
 	},
-	"organizeImports": {
-		"enabled": true
-	},
+	"assist": { "actions": { "source": { "organizeImports": "on" } } },
 	"files": {
-		"ignore": ["dist/", "node_modules/", "coverage/"]
+		"includes": ["**", "!**/dist/", "!**/node_modules/", "!**/coverage/"]
 	}
 }

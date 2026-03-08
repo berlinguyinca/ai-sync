@@ -1,7 +1,7 @@
 import type { Command } from "commander";
 import pc from "picocolors";
-import { syncStatus } from "../../core/sync-engine.js";
 import type { SyncStatusResult } from "../../core/sync-engine.js";
+import { syncStatus } from "../../core/sync-engine.js";
 import { getClaudeDir, getSyncRepoDir } from "../../platform/paths.js";
 
 /**
@@ -54,11 +54,7 @@ export function registerStatusCommand(program: Command): void {
 					console.log(pc.yellow("No remote configured"));
 				}
 
-				if (
-					result.isClean &&
-					result.remoteDrift.ahead === 0 &&
-					result.remoteDrift.behind === 0
-				) {
+				if (result.isClean && result.remoteDrift.ahead === 0 && result.remoteDrift.behind === 0) {
 					console.log(pc.green("Everything is in sync"));
 				} else {
 					// Local modifications
@@ -84,9 +80,7 @@ export function registerStatusCommand(program: Command): void {
 					}
 				}
 
-				console.log(
-					pc.dim(`Excluded: ${result.excludedCount} files (not in sync manifest)`),
-				);
+				console.log(pc.dim(`Excluded: ${result.excludedCount} files (not in sync manifest)`));
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
 				console.error(pc.red(`Status failed: ${message}`));

@@ -1,7 +1,7 @@
 import type { Command } from "commander";
 import pc from "picocolors";
-import { syncPull } from "../../core/sync-engine.js";
 import type { SyncPullResult } from "../../core/sync-engine.js";
+import { syncPull } from "../../core/sync-engine.js";
 import { getClaudeDir, getSyncRepoDir } from "../../platform/paths.js";
 
 /**
