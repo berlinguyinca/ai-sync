@@ -92,6 +92,7 @@ Scans `~/.claude` for changes, copies updated files to the sync repo with path r
 
 ```bash
 claude-sync push
+claude-sync push -v               # show detailed file changes
 ```
 
 Output:
@@ -105,6 +106,7 @@ Fetches remote changes and applies them to `~/.claude`. Always creates a timesta
 
 ```bash
 claude-sync pull
+claude-sync pull -v               # show detailed file changes
 ```
 
 Output:
@@ -119,6 +121,7 @@ Shows local modifications, remote drift, and excluded file count.
 
 ```bash
 claude-sync status
+claude-sync status -v             # include branch, tracking info, synced file count
 ```
 
 Output:
@@ -132,12 +135,41 @@ Excluded: 847 files (not in sync manifest)
 
 ### `claude-sync bootstrap <repo-url>`
 
-Sets up a new machine from an existing remote sync repo. Clones the repo, applies files to `~/.claude` with path expansion, and backs up any existing config.
+Sets up a new machine from an existing remote sync repo. Clones the repo, applies files to `~/.claude` with path expansion, backs up any existing config, and installs skills.
 
 ```bash
 claude-sync bootstrap git@github.com:you/claude-config.git
 claude-sync bootstrap https://github.com/you/claude-config.git
 claude-sync bootstrap <url> --force   # re-clone if sync repo exists
+```
+
+### `claude-sync update`
+
+Checks for and applies tool updates. claude-sync also checks automatically once every 24 hours on startup (disable with `--no-update-check`).
+
+```bash
+claude-sync update
+claude-sync update --force        # check even if checked recently
+```
+
+### `claude-sync install-skills`
+
+Installs Claude Code slash commands (like `/sync`) into `~/.claude/commands/`. This runs automatically during `init` and `bootstrap`, but you can run it manually after updating.
+
+```bash
+claude-sync install-skills
+```
+
+### The `/sync` skill
+
+After installation, you can type `/sync` inside Claude Code to pull, push, and check status in one step — no need to leave the conversation.
+
+### Global options
+
+```bash
+claude-sync --no-update-check <command>   # skip the auto-update check
+claude-sync --version                      # show version
+claude-sync --help                         # show help
 ```
 
 ## What syncs (and what doesn't)
@@ -225,23 +257,31 @@ npm run build
 src/
 ├── cli/
 │   ├── index.ts              # Commander.js entry point
+│   ├── format.ts             # Colored output formatting
 │   └── commands/
 │       ├── init.ts           # claude-sync init
 │       ├── push.ts           # claude-sync push
 │       ├── pull.ts           # claude-sync pull
 │       ├── status.ts         # claude-sync status
-│       └── bootstrap.ts      # claude-sync bootstrap
+│       ├── bootstrap.ts      # claude-sync bootstrap
+│       ├── update.ts         # claude-sync update
+│       └── install-skills.ts # claude-sync install-skills
 ├── core/
 │   ├── manifest.ts           # Allowlist of sync targets
 │   ├── scanner.ts            # Directory scanner filtered by manifest
 │   ├── path-rewriter.ts      # {{HOME}} token rewriting
 │   ├── backup.ts             # Timestamped backup creation
-│   └── sync-engine.ts        # Push/pull/status orchestration
+│   ├── sync-engine.ts        # Push/pull/status orchestration
+│   ├── updater.ts            # Auto-update mechanism
+│   └── skills.ts             # Skill installation (/sync command)
 ├── git/
 │   └── repo.ts               # Git operations wrapper (simple-git)
 ├── platform/
 │   └── paths.ts              # Cross-platform path resolution
 └── index.ts                  # Library exports
+
+skills/
+└── sync.md                   # /sync Claude Code slash command
 ```
 
 ## License
