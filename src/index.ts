@@ -36,3 +36,7 @@ export {
 	writeGitattributes,
 } from "./git/repo.js";
 export { getClaudeDir, getHomeDir, getSyncRepoDir, normalizePath } from "./platform/paths.js";
+export type { InstallSkillsResult } from "./core/skills.js";
+export { installSkills } from "./core/skills.js";
+export type { UpdateResult } from "./core/updater.js";
+export { getInstallDir, performUpdate, startupUpdateCheck } from "./core/updater.js";

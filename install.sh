@@ -221,6 +221,10 @@ ok "claude-sync installed successfully!"
 # Use the built binary directly — symlink may not be in PATH yet
 CLAUDE_SYNC="node $INSTALL_DIR/dist/cli.js"
 
+# Install Claude Code slash commands (e.g., /sync)
+info "Installing Claude Code skills..."
+$CLAUDE_SYNC install-skills --no-update-check 2>/dev/null && ok "Claude Code /sync command installed" || warn "Skill installation skipped (run 'claude-sync install-skills' later)"
+
 # ── setup sync repo ───────────────────────────────────────────────
 
 # Skip setup if sync repo already exists (update flow)

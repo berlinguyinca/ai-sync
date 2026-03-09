@@ -35,6 +35,11 @@ export async function scanDirectory(sourceDir: string): Promise<string[]> {
 			path.relative(sourceDir, path.join(entry.parentPath, entry.name)),
 		);
 
+		// Skip files inside .git directories (cloned plugin repos, etc.)
+		if (relativePath.includes(".git/") || relativePath.startsWith(".git")) {
+			continue;
+		}
+
 		if (isPathAllowed(relativePath)) {
 			allowedFiles.push(relativePath);
 		}

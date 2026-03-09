@@ -1,47 +1,122 @@
-import * as path from "node:path";
-
 /**
- * Rewrites absolute home directory paths in content to portable {{HOME}} tokens.
- * Used when copying settings.json into the sync repo.
- *
- * Handles Windows-style backslash paths: replaces both the native homeDir and
- * its forward-slash variant, then normalizes any remaining backslash separators
- * after the {{HOME}} token to forward slashes for portable POSIX-style storage.
- *
- * @param content - The file content to process
- * @param homeDir - The absolute path to the home directory to replace
- * @returns Content with home directory paths replaced by {{HOME}} using POSIX separators
+ * Recursively walks a JSON value and applies a transform to every string leaf.
+ * Returns a new value (does not mutate).
  */
-export function rewritePathsForRepo(content: string, homeDir: string): string {
-	let result = content.replaceAll(homeDir, "{{HOME}}");
-	if (path.sep === "\\" || homeDir.includes("\\")) {
-		// On Windows, homeDir uses backslashes (e.g. C:\Users\bob).
-		// JSON content may contain the JSON-escaped variant with doubled backslashes
-		// (e.g. C:\\Users\\bob). Replace that variant too.
-		const jsonEscapedHome = homeDir.replaceAll("\\", "\\\\");
-		result = result.replaceAll(jsonEscapedHome, "{{HOME}}");
-		// Also handle forward-slash variant in case content has mixed separators.
-		const forwardSlashHome = homeDir.replaceAll("\\", "/");
-		result = result.replaceAll(forwardSlashHome, "{{HOME}}");
-		// Normalize backslash path separators in {{HOME}}-prefixed paths to forward slashes.
-		// Only needed on Windows where paths use backslashes.
-		result = result.replace(
-			/\{\{HOME\}\}([^"'\s,}]*)/g,
-			(_match, pathPart: string) =>
-				`{{HOME}}${pathPart.replaceAll("\\\\", "/").replaceAll("\\", "/")}`,
-		);
+function deepMapStrings(
+	value: unknown,
+	transform: (s: string) => string,
+): unknown {
+	if (typeof value === "string") {
+		return transform(value);
 	}
-	return result;
+	if (Array.isArray(value)) {
+		return value.map((item) => deepMapStrings(item, transform));
+	}
+	if (value !== null && typeof value === "object") {
+		const result: Record<string, unknown> = {};
+		for (const [key, val] of Object.entries(value)) {
+			result[key] = deepMapStrings(val, transform);
+		}
+		return result;
+	}
+	return value; // numbers, booleans, null
 }
 
 /**
- * Expands {{HOME}} tokens in content to the local home directory path.
+ * Detects the indentation used in a JSON string.
+ * Returns the indent argument for JSON.stringify (number of spaces or undefined for compact).
+ */
+function detectIndent(content: string): number | undefined {
+	const match = content.match(/^[\t ]*\n([ \t]+)"/m);
+	if (match) {
+		return match[1].length;
+	}
+	// Check if it looks like pretty-printed JSON (has newlines between properties)
+	if (content.includes("\n")) {
+		return 2;
+	}
+	return undefined; // compact
+}
+
+/**
+ * Rewrites absolute home directory paths in JSON content to portable {{HOME}} tokens.
+ * Used when copying settings.json into the sync repo.
+ *
+ * Operates on parsed JSON values to avoid any interaction with JSON escaping.
+ * Also normalizes Windows-style backslash separators to forward slashes in
+ * {{HOME}}-prefixed paths for portable POSIX-style storage.
+ *
+ * @param content - The JSON file content to process
+ * @param homeDir - The absolute path to the home directory to replace
+ * @returns JSON content with home directory paths replaced by {{HOME}}
+ */
+export function rewritePathsForRepo(
+	content: string,
+	homeDir: string,
+): string {
+	try {
+		const parsed = JSON.parse(content);
+		const indent = detectIndent(content);
+
+		// Build list of homeDir variants to replace (native, forward-slash)
+		const variants = new Set<string>();
+		variants.add(homeDir);
+		if (homeDir.includes("\\")) {
+			variants.add(homeDir.replaceAll("\\", "/"));
+		}
+
+		const rewritten = deepMapStrings(parsed, (s) => {
+			let result = s;
+			for (const variant of variants) {
+				result = result.replaceAll(variant, "{{HOME}}");
+			}
+			// Normalize backslash path separators to forward slashes in
+			// {{HOME}}-prefixed paths (Windows → POSIX portability).
+			// e.g., {{HOME}}\.claude\hooks\test.js → {{HOME}}/.claude/hooks/test.js
+			if (result.includes("{{HOME}}")) {
+				result = result.replace(
+					/\{\{HOME\}\}([^\s]*)/g,
+					(_match, rest: string) =>
+						`{{HOME}}${rest.replaceAll("\\", "/")}`,
+				);
+			}
+			return result;
+		});
+
+		const suffix = content.endsWith("\n") ? "\n" : "";
+		return JSON.stringify(rewritten, null, indent) + suffix;
+	} catch {
+		// Not valid JSON — fall back to plain string replacement
+		return content.replaceAll(homeDir, "{{HOME}}");
+	}
+}
+
+/**
+ * Expands {{HOME}} tokens in JSON content to the local home directory path.
  * Used when applying settings.json from the sync repo to the local machine.
  *
- * @param content - The file content to process
+ * Operates on parsed JSON values to avoid any interaction with JSON escaping.
+ *
+ * @param content - The JSON file content to process
  * @param homeDir - The absolute path to the local home directory
- * @returns Content with {{HOME}} tokens replaced by the home directory
+ * @returns JSON content with {{HOME}} tokens replaced by the home directory
  */
-export function expandPathsForLocal(content: string, homeDir: string): string {
-	return content.replaceAll("{{HOME}}", homeDir);
+export function expandPathsForLocal(
+	content: string,
+	homeDir: string,
+): string {
+	try {
+		const parsed = JSON.parse(content);
+		const indent = detectIndent(content);
+
+		const expanded = deepMapStrings(parsed, (s) =>
+			s.replaceAll("{{HOME}}", homeDir),
+		);
+
+		const suffix = content.endsWith("\n") ? "\n" : "";
+		return JSON.stringify(expanded, null, indent) + suffix;
+	} catch {
+		// Not valid JSON — fall back to plain string replacement
+		return content.replaceAll("{{HOME}}", homeDir);
+	}
 }

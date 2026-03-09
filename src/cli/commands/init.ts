@@ -2,16 +2,17 @@ import type { Command } from "commander";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import pc from "picocolors";
-import { scanDirectory } from "../../core/scanner.js";
 import { rewritePathsForRepo } from "../../core/path-rewriter.js";
+import { scanDirectory } from "../../core/scanner.js";
+import { installSkills } from "../../core/skills.js";
 import {
-	initRepo,
-	isGitRepo,
 	addFiles,
 	commitFiles,
+	initRepo,
+	isGitRepo,
 	writeGitattributes,
 } from "../../git/repo.js";
-import { getHomeDir, getClaudeDir, getSyncRepoDir } from "../../platform/paths.js";
+import { getClaudeDir, getHomeDir, getSyncRepoDir } from "../../platform/paths.js";
 
 /**
  * Result of the init command for programmatic inspection.
@@ -111,6 +112,9 @@ export async function handleInit(options: InitOptions): Promise<InitResult> {
 	});
 	const totalFiles = allEntries.filter((e) => e.isFile()).length;
 	const filesExcluded = totalFiles - copiedFiles.length;
+
+	// Install Claude Code skills (e.g., /sync command)
+	await installSkills(claudeDir);
 
 	return {
 		syncRepoDir,

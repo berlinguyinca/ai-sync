@@ -6,6 +6,7 @@ import { simpleGit } from "simple-git";
 import { createBackup } from "../../core/backup.js";
 import { expandPathsForLocal } from "../../core/path-rewriter.js";
 import { scanDirectory } from "../../core/scanner.js";
+import { installSkills } from "../../core/skills.js";
 import { isGitRepo } from "../../git/repo.js";
 import { getClaudeDir, getSyncRepoDir } from "../../platform/paths.js";
 
@@ -77,6 +78,9 @@ export async function handleBootstrap(options: BootstrapOptions): Promise<Bootst
 		}
 		await fs.writeFile(destPath, content);
 	}
+
+	// Install Claude Code skills (e.g., /sync command)
+	await installSkills(claudeDir);
 
 	return {
 		syncRepoDir,

@@ -3,3 +3,4 @@ dist/
 coverage/
 *.tsbuildinfo
 .DS_Store
+.last-update-check
