@@ -101,7 +101,7 @@ export async function pushToRemote(
 	remote = "origin",
 	branch = "main",
 ): Promise<PushResult> {
-	return simpleGit(repoPath).push(remote, branch);
+	return simpleGit(repoPath).push(remote, branch, ["--set-upstream"]);
 }
 
 /**

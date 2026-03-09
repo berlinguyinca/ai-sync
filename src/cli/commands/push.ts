@@ -32,11 +32,21 @@ export function registerPushCommand(program: Command): void {
 		.description("Push local ~/.claude changes to the remote repo")
 		.option("--repo-path <path>", "Custom sync repo path", getSyncRepoDir())
 		.option("--claude-dir <path>", "Custom ~/.claude path", getClaudeDir())
+		.option("-v, --verbose", "Show detailed file changes", false)
 		.action(async (opts) => {
 			try {
 				const result = await handlePush(opts);
 				if (result.pushed) {
-					console.log(pc.green(`Pushed ${result.filesUpdated} files to remote`));
+					if (opts.verbose && result.fileChanges.length > 0) {
+						for (const change of result.fileChanges) {
+							const indicator =
+								change.type === "modified" ? pc.yellow("M")
+								: change.type === "added" ? pc.green("A")
+								: pc.red("D");
+							console.log(`  ${indicator} ${change.path}`);
+						}
+					}
+					console.log(pc.green(result.message));
 				} else {
 					console.log(pc.yellow("No changes to push -- already up to date"));
 				}

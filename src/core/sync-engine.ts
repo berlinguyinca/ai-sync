@@ -32,6 +32,7 @@ export interface SyncPushResult {
 	filesUpdated: number;
 	pushed: boolean;
 	message: string;
+	fileChanges: FileChange[];
 }
 
 /**
@@ -41,6 +42,7 @@ export interface SyncPullResult {
 	backupDir: string;
 	filesApplied: number;
 	message: string;
+	fileChanges: FileChange[];
 }
 
 /**
@@ -58,6 +60,7 @@ export interface SyncStatusResult {
 	localModifications: FileChange[];
 	remoteDrift: { ahead: number; behind: number };
 	excludedCount: number;
+	syncedCount: number;
 	branch: string | null;
 	tracking: string | null;
 	isClean: boolean;
@@ -128,12 +131,32 @@ export async function syncPush(options: SyncOptions): Promise<SyncPushResult> {
 	// Check git status
 	const status = await getStatus(syncRepoDir);
 	if (status.isClean()) {
+		// Handle unpushed commits from a previous failed push
+		if (status.ahead > 0) {
+			await pushToRemote(syncRepoDir);
+			return {
+				filesUpdated: 0,
+				pushed: true,
+				message: "Pushed previously committed changes to remote",
+				fileChanges: [],
+			};
+		}
 		return {
-			filesUpdated: localFiles.length,
+			filesUpdated: 0,
 			pushed: false,
 			message: "No changes to push",
+			fileChanges: [],
 		};
 	}
+
+	// Build file change list from git status
+	const fileChanges: FileChange[] = status.files.map((f) => ({
+		path: f.path,
+		type:
+			f.working_dir === "?" ? "added"
+			: f.working_dir === "D" ? "deleted"
+			: "modified",
+	}));
 
 	// Stage, commit, push
 	await addFiles(syncRepoDir, ["."]);
@@ -141,9 +164,10 @@ export async function syncPush(options: SyncOptions): Promise<SyncPushResult> {
 	await pushToRemote(syncRepoDir);
 
 	return {
-		filesUpdated: localFiles.length,
+		filesUpdated: fileChanges.length,
 		pushed: true,
-		message: `Pushed ${localFiles.length} files to remote`,
+		message: `Pushed ${fileChanges.length} files to remote`,
+		fileChanges,
 	};
 }
 
@@ -182,7 +206,9 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 	// Scan repo for files to apply
 	const repoFiles = await scanDirectory(syncRepoDir);
 
-	// Copy each file from syncRepoDir to claudeDir
+	// Copy each file from syncRepoDir to claudeDir, tracking changes
+	const fileChanges: FileChange[] = [];
+
 	for (const relativePath of repoFiles) {
 		const srcPath = path.join(syncRepoDir, relativePath);
 		const destPath = path.join(claudeDir, relativePath);
@@ -196,13 +222,39 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 			content = expandPathsForLocal(content, homeDir);
 		}
 
+		// Detect whether this is a new file or a content change
+		let changeType: FileChange["type"] | null = null;
+		try {
+			const existing = await fs.readFile(destPath, "utf-8");
+			if (existing !== content) {
+				changeType = "modified";
+			}
+		} catch {
+			changeType = "added";
+		}
+
 		await fs.writeFile(destPath, content);
+
+		if (changeType) {
+			fileChanges.push({ path: relativePath, type: changeType });
+		}
+	}
+
+	// Remove local files that no longer exist in the repo (propagate deletions)
+	const localFiles = await scanDirectory(claudeDir);
+	const repoFileSet = new Set(repoFiles);
+	for (const localFile of localFiles) {
+		if (!repoFileSet.has(localFile)) {
+			await fs.rm(path.join(claudeDir, localFile));
+			fileChanges.push({ path: localFile, type: "deleted" });
+		}
 	}
 
 	return {
 		backupDir,
 		filesApplied: repoFiles.length,
 		message: `Applied ${repoFiles.length} files from remote. Backup at: ${backupDir}`,
+		fileChanges,
 	};
 }
 
@@ -311,6 +363,7 @@ export async function syncStatus(
 			behind: gitStatus.behind,
 		},
 		excludedCount,
+		syncedCount: localFiles.length,
 		branch: gitStatus.current,
 		tracking: gitStatus.tracking,
 		isClean: modifications.length === 0 && gitStatus.ahead === 0 && gitStatus.behind === 0,

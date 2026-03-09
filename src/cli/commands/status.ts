@@ -46,6 +46,7 @@ export function registerStatusCommand(program: Command): void {
 		.description("Show sync status between local ~/.claude and remote")
 		.option("--repo-path <path>", "Custom sync repo path", getSyncRepoDir())
 		.option("--claude-dir <path>", "Custom ~/.claude path", getClaudeDir())
+		.option("-v, --verbose", "Show detailed sync info", false)
 		.action(async (opts) => {
 			try {
 				const result = await handleStatus(opts);
@@ -54,7 +55,16 @@ export function registerStatusCommand(program: Command): void {
 					console.log(pc.yellow("No remote configured"));
 				}
 
-				if (result.isClean && result.remoteDrift.ahead === 0 && result.remoteDrift.behind === 0) {
+				if (opts.verbose) {
+					if (result.branch) {
+						console.log(pc.dim(`Branch: ${result.branch}`));
+					}
+					if (result.tracking) {
+						console.log(pc.dim(`Tracking: ${result.tracking}`));
+					}
+				}
+
+				if (result.isClean) {
 					console.log(pc.green("Everything is in sync"));
 				} else {
 					// Local modifications
@@ -80,6 +90,9 @@ export function registerStatusCommand(program: Command): void {
 					}
 				}
 
+				if (opts.verbose) {
+					console.log(pc.dim(`Synced: ${result.syncedCount} files`));
+				}
 				console.log(pc.dim(`Excluded: ${result.excludedCount} files (not in sync manifest)`));
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
