@@ -270,7 +270,10 @@ export async function syncPush(options: SyncOptions): Promise<SyncPushResult> {
 	}
 
 	if (options.dryRun) {
-		// Revert working tree changes so dry-run is truly side-effect free
+		// Revert working tree changes so dry-run is truly side-effect free.
+		// This only affects the managed sync repo (not user project files).
+		// Any manual edits in the sync repo will be reverted — this is acceptable
+		// because the sync repo is machine-managed and not meant for hand-editing.
 		const git = await import("simple-git").then((m) => m.simpleGit(syncRepoDir));
 		await git.checkout(["."]);
 		// Remove untracked files added during dry-run scan

@@ -24,6 +24,12 @@ function checkSshConnectivity(repoUrl: string): string | null {
 	if (!sshMatch && !repoUrl.includes("git@")) return null;
 
 	const host = sshMatch?.[1] ?? "github.com";
+
+	// Validate hostname to prevent command injection — only allow DNS-safe characters
+	if (!/^[a-zA-Z0-9._-]+$/.test(host)) {
+		return `Invalid hostname in repository URL: ${host}`;
+	}
+
 	try {
 		execSync(`ssh -T -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new ${host}`, {
 			stdio: "pipe",
