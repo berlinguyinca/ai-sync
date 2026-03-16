@@ -8,7 +8,7 @@ describe("scanner", () => {
 	let tmpDir: string;
 
 	beforeEach(async () => {
-		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "claude-sync-test-"));
+		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-sync-test-"));
 	});
 
 	afterEach(async () => {

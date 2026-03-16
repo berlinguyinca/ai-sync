@@ -13,6 +13,7 @@ export interface StatusOptions {
 	repoPath?: string;
 	claudeDir?: string;
 	env?: string;
+	verbose?: boolean;
 }
 
 /**
@@ -26,6 +27,7 @@ export async function handleStatus(options: StatusOptions): Promise<SyncStatusRe
 		syncRepoDir: options.repoPath ?? getSyncRepoDir(),
 		environments,
 		filterEnv: options.env,
+		verbose: options.verbose,
 	});
 }
 

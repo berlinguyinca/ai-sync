@@ -1,5 +1,6 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import pc from "picocolors";
 import {
 	addFiles,
 	commitFiles,
@@ -29,6 +30,17 @@ export interface SyncOptions {
 	dryRun?: boolean;
 	/** Limit operation to a specific environment by id. */
 	filterEnv?: string;
+	/** When true, emit progress messages to stdout during operations. */
+	verbose?: boolean;
+}
+
+/**
+ * Logs a message to stdout when verbose mode is enabled.
+ */
+function verboseLog(options: SyncOptions, message: string): void {
+	if (options.verbose) {
+		console.log(pc.dim(`  [verbose] ${message}`));
+	}
 }
 
 /**
@@ -114,6 +126,7 @@ export async function syncPush(options: SyncOptions): Promise<SyncPushResult> {
 	const { syncRepoDir } = options;
 
 	// Check remote exists
+	verboseLog(options, "Checking remote configuration...");
 	const remoteConfigured = await hasRemote(syncRepoDir);
 	if (!remoteConfigured) {
 		throw new Error(
@@ -122,6 +135,7 @@ export async function syncPush(options: SyncOptions): Promise<SyncPushResult> {
 	}
 
 	// Fetch and check if behind
+	verboseLog(options, "Fetching from remote...");
 	await fetchRemote(syncRepoDir);
 	const preStatus = await getStatus(syncRepoDir);
 	if (preStatus.behind > 0) {
@@ -133,7 +147,9 @@ export async function syncPush(options: SyncOptions): Promise<SyncPushResult> {
 		);
 	}
 
+	verboseLog(options, "Detecting repo version...");
 	const version = await detectRepoVersion(syncRepoDir);
+	verboseLog(options, `Repo version: v${version}`);
 	const perEnvironment: Record<string, { filesUpdated: number; fileChanges: FileChange[] }> = {};
 	const errors: Record<string, string> = {};
 	const envs = options.filterEnv
@@ -144,6 +160,7 @@ export async function syncPush(options: SyncOptions): Promise<SyncPushResult> {
 		// v2 multi-environment mode
 		for (const env of envs) {
 			try {
+				verboseLog(options, `Processing environment: ${env.id}`);
 				const configDir = env.getConfigDir();
 				const homeDir = options.homeDir ?? path.dirname(configDir);
 				const repoSubdir = getRepoSubdir(syncRepoDir, env.id, 2);
@@ -152,12 +169,15 @@ export async function syncPush(options: SyncOptions): Promise<SyncPushResult> {
 					await fs.access(configDir);
 				} catch {
 					// Config dir doesn't exist for this env, skip
+					verboseLog(options, `Config dir not found for ${env.id}, skipping`);
 					perEnvironment[env.id] = { filesUpdated: 0, fileChanges: [] };
 					continue;
 				}
 
 				const allowlistFn = makeAllowlistFn(env);
+				verboseLog(options, `Scanning ${configDir}...`);
 				const localFiles = await scanDirectory(configDir, allowlistFn);
+				verboseLog(options, `Found ${localFiles.length} files for ${env.id}`);
 
 				if (!options.dryRun) {
 					// Copy each file from configDir to repoSubdir
@@ -168,6 +188,7 @@ export async function syncPush(options: SyncOptions): Promise<SyncPushResult> {
 						await fs.mkdir(path.dirname(destPath), { recursive: true });
 						let content = await fs.readFile(srcPath, "utf-8");
 						if (needsPathRewrite(relativePath, env)) {
+							verboseLog(options, `Rewriting paths in ${relativePath}`);
 							content = rewritePathsForRepo(content, homeDir);
 						}
 						await fs.writeFile(destPath, content);
@@ -195,8 +216,11 @@ export async function syncPush(options: SyncOptions): Promise<SyncPushResult> {
 		}
 	} else {
 		// v1 flat mode or single-environment fallback
+		verboseLog(options, "Using v1 flat mode");
 		const { claudeDir, homeDir } = resolveLegacyPaths(options);
+		verboseLog(options, `Scanning ${claudeDir}...`);
 		const localFiles = await scanDirectory(claudeDir);
+		verboseLog(options, `Found ${localFiles.length} files`);
 
 		for (const relativePath of localFiles) {
 			const srcPath = path.join(claudeDir, relativePath);
@@ -204,6 +228,7 @@ export async function syncPush(options: SyncOptions): Promise<SyncPushResult> {
 			await fs.mkdir(path.dirname(destPath), { recursive: true });
 			let content = await fs.readFile(srcPath, "utf-8");
 			if (path.basename(relativePath) === "settings.json") {
+				verboseLog(options, "Rewriting paths in settings.json");
 				content = rewritePathsForRepo(content, homeDir);
 			}
 			await fs.writeFile(destPath, content);
@@ -214,6 +239,7 @@ export async function syncPush(options: SyncOptions): Promise<SyncPushResult> {
 		const localFileSet = new Set(localFiles);
 		for (const repoFile of repoFiles) {
 			if (!localFileSet.has(repoFile)) {
+				verboseLog(options, `Removing deleted file: ${repoFile}`);
 				await fs.rm(path.join(syncRepoDir, repoFile));
 			}
 		}
@@ -223,6 +249,7 @@ export async function syncPush(options: SyncOptions): Promise<SyncPushResult> {
 	const errorsResult = hasErrors ? errors : undefined;
 
 	// Check git status
+	verboseLog(options, "Checking git status...");
 	const status = await getStatus(syncRepoDir);
 	if (status.isClean()) {
 		if (status.ahead > 0 && !options.dryRun) {
@@ -290,8 +317,11 @@ export async function syncPush(options: SyncOptions): Promise<SyncPushResult> {
 	}
 
 	// Stage, commit, push
+	verboseLog(options, `Staging ${fileChanges.length} file(s)...`);
 	await addFiles(syncRepoDir, ["."]);
+	verboseLog(options, "Committing...");
 	await commitFiles(syncRepoDir, "sync: update config");
+	verboseLog(options, "Pushing to remote...");
 	await pushToRemote(syncRepoDir);
 
 	return {
@@ -311,6 +341,7 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 	const { syncRepoDir } = options;
 
 	// Check remote exists
+	verboseLog(options, "Checking remote configuration...");
 	const remoteConfigured = await hasRemote(syncRepoDir);
 	if (!remoteConfigured) {
 		throw new Error(
@@ -318,7 +349,9 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 		);
 	}
 
+	verboseLog(options, "Detecting repo version...");
 	const version = await detectRepoVersion(syncRepoDir);
+	verboseLog(options, `Repo version: v${version}`);
 	const allFileChanges: FileChange[] = [];
 	let backupDir = "";
 	let totalApplied = 0;
@@ -331,6 +364,7 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 	if (envs.length > 0 && version === 2) {
 		// v2 multi-environment mode: backup all environments first
 		if (!options.dryRun) {
+			verboseLog(options, "Creating backup of current config...");
 			const backupBaseDir = path.join(path.dirname(syncRepoDir), ".ai-sync-backups");
 			const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
 			backupDir = path.join(backupBaseDir, timestamp);
@@ -358,15 +392,18 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 			}
 
 			// Pull from remote
+			verboseLog(options, "Pulling from remote...");
 			await pullFromRemote(syncRepoDir);
 		} else {
 			// Dry-run: fetch to see what's available but don't pull
+			verboseLog(options, "Fetching from remote (dry-run)...");
 			await fetchRemote(syncRepoDir);
 		}
 
 		// Apply (or preview) files per environment
 		for (const env of envs) {
 			try {
+				verboseLog(options, `Processing environment: ${env.id}`);
 				const configDir = env.getConfigDir();
 				const homeDir = options.homeDir ?? path.dirname(configDir);
 				const repoSubdir = getRepoSubdir(syncRepoDir, env.id, 2);
@@ -382,6 +419,7 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 				}
 
 				const repoFiles = await scanDirectory(repoSubdir, allowlistFn);
+				verboseLog(options, `Found ${repoFiles.length} files in repo for ${env.id}`);
 
 				if (!options.dryRun) {
 					await fs.mkdir(configDir, { recursive: true });
@@ -392,6 +430,7 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 					const destPath = path.join(configDir, relativePath);
 					let content = await fs.readFile(srcPath, "utf-8");
 					if (needsPathRewrite(relativePath, env)) {
+						verboseLog(options, `Expanding paths in ${relativePath}`);
 						content = expandPathsForLocal(content, homeDir);
 					}
 
@@ -438,11 +477,13 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 		}
 	} else {
 		// v1 flat mode or single-environment fallback
+		verboseLog(options, "Using v1 flat mode");
 		const { claudeDir, homeDir } = resolveLegacyPaths(options);
 
 		// Create backup
+		verboseLog(options, "Creating backup of current config...");
 		const backupBaseDir = path.join(path.dirname(syncRepoDir), ".ai-sync-backups");
-		// Fallback: check if old backup dir exists
+		// Fallback: check if old backup dir exists (migration from claude-sync)
 		const oldBackupDir = path.join(path.dirname(syncRepoDir), ".claude-sync-backups");
 		let effectiveBackupBase = backupBaseDir;
 		try {
@@ -452,12 +493,16 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 			// use new path
 		}
 		backupDir = await createBackup(claudeDir, effectiveBackupBase);
+		verboseLog(options, `Backup created at ${backupDir}`);
 
 		// Pull from remote
+		verboseLog(options, "Pulling from remote...");
 		await pullFromRemote(syncRepoDir);
 
 		// Scan repo for files to apply
+		verboseLog(options, "Scanning repo for files to apply...");
 		const repoFiles = await scanDirectory(syncRepoDir);
+		verboseLog(options, `Found ${repoFiles.length} files in repo`);
 
 		for (const relativePath of repoFiles) {
 			const srcPath = path.join(syncRepoDir, relativePath);
@@ -516,6 +561,7 @@ export async function syncStatus(options: SyncOptions): Promise<SyncStatusResult
 	const { syncRepoDir } = options;
 
 	// Check remote and fetch if available
+	verboseLog(options, "Checking remote configuration...");
 	const remoteConfigured = await hasRemote(syncRepoDir);
 	let gitStatus: {
 		ahead: number;
@@ -525,6 +571,7 @@ export async function syncStatus(options: SyncOptions): Promise<SyncStatusResult
 	};
 
 	if (remoteConfigured) {
+		verboseLog(options, "Fetching from remote...");
 		await fetchRemote(syncRepoDir);
 		const status = await getStatus(syncRepoDir);
 		gitStatus = {
@@ -543,7 +590,9 @@ export async function syncStatus(options: SyncOptions): Promise<SyncStatusResult
 		};
 	}
 
+	verboseLog(options, "Detecting repo version...");
 	const version = await detectRepoVersion(syncRepoDir);
+	verboseLog(options, `Repo version: v${version}`);
 	const allModifications: FileChange[] = [];
 	let totalSynced = 0;
 	let totalExcluded = 0;
@@ -558,6 +607,7 @@ export async function syncStatus(options: SyncOptions): Promise<SyncStatusResult
 	if (envs.length > 0 && version === 2) {
 		// v2 multi-environment mode
 		for (const env of envs) {
+			verboseLog(options, `Comparing environment: ${env.id}`);
 			const configDir = env.getConfigDir();
 			const homeDir = options.homeDir ?? path.dirname(configDir);
 			const repoSubdir = getRepoSubdir(syncRepoDir, env.id, 2);
@@ -578,6 +628,11 @@ export async function syncStatus(options: SyncOptions): Promise<SyncStatusResult
 			} catch {
 				// Repo subdir doesn't exist
 			}
+
+			verboseLog(
+				options,
+				`${env.id}: ${localFiles.length} local files, ${repoFiles.length} repo files`,
+			);
 
 			const localFileSet = new Set(localFiles);
 			const repoFileSet = new Set(repoFiles);
@@ -634,10 +689,14 @@ export async function syncStatus(options: SyncOptions): Promise<SyncStatusResult
 		}
 	} else {
 		// v1 flat mode or single-environment fallback
+		verboseLog(options, "Using v1 flat mode");
 		const { claudeDir, homeDir } = resolveLegacyPaths(options);
 
+		verboseLog(options, `Scanning local: ${claudeDir}`);
 		const localFiles = await scanDirectory(claudeDir);
+		verboseLog(options, `Scanning repo: ${syncRepoDir}`);
 		const repoFiles = await scanDirectory(syncRepoDir);
+		verboseLog(options, `${localFiles.length} local files, ${repoFiles.length} repo files`);
 
 		const localFileSet = new Set(localFiles);
 		const repoFileSet = new Set(repoFiles);

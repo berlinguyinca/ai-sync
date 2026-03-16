@@ -14,6 +14,7 @@ export interface PullOptions {
 	claudeDir?: string;
 	dryRun?: boolean;
 	env?: string;
+	verbose?: boolean;
 }
 
 /**
@@ -28,6 +29,7 @@ export async function handlePull(options: PullOptions): Promise<SyncPullResult> 
 		environments,
 		dryRun: options.dryRun,
 		filterEnv: options.env,
+		verbose: options.verbose,
 	});
 }
 

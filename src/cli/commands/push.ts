@@ -14,6 +14,7 @@ export interface PushOptions {
 	claudeDir?: string;
 	dryRun?: boolean;
 	env?: string;
+	verbose?: boolean;
 }
 
 /**
@@ -28,6 +29,7 @@ export async function handlePush(options: PushOptions): Promise<SyncPushResult> 
 		environments,
 		dryRun: options.dryRun,
 		filterEnv: options.env,
+		verbose: options.verbose,
 	});
 }
 

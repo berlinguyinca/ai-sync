@@ -41,7 +41,7 @@ export function getOpenCodeConfigDir(): string {
 /**
  * Returns the path to the sync repo directory.
  * Uses a custom path if provided, otherwise defaults to ~/.ai-sync.
- * Falls back to ~/.claude-sync if it exists (migration support).
+ * Falls back to ~/.claude-sync if it exists (migration from claude-sync).
  */
 export function getSyncRepoDir(customPath?: string): string {
 	if (customPath) return customPath;

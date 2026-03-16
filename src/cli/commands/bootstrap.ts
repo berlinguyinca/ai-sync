@@ -59,6 +59,7 @@ export interface BootstrapOptions {
 	repoPath?: string;
 	claudeDir?: string;
 	force?: boolean;
+	verbose?: boolean;
 }
 
 export interface BootstrapResult {
@@ -77,22 +78,29 @@ export async function handleBootstrap(options: BootstrapOptions): Promise<Bootst
 	const claudeDir = options.claudeDir ?? getClaudeDir();
 	const homeDir = path.dirname(claudeDir);
 	const environments = getEnabledEnvironmentInstances();
+	const log = (msg: string) => {
+		if (options.verbose) console.log(pc.dim(`  [verbose] ${msg}`));
+	};
 
 	// Guard: sync repo must not already exist (unless --force)
+	log("Checking for existing sync repo...");
 	if (await isGitRepo(syncRepoDir)) {
 		if (!options.force) {
 			throw new Error(`Sync repo already exists at ${syncRepoDir}. Use --force to re-clone.`);
 		}
+		log("Removing existing sync repo (--force)...");
 		await fs.rm(syncRepoDir, { recursive: true, force: true });
 	}
 
 	// Validate SSH connectivity for SSH URLs before attempting clone
+	log("Checking SSH connectivity...");
 	const sshError = checkSshConnectivity(options.repoUrl);
 	if (sshError) {
 		throw new Error(sshError);
 	}
 
 	// Clone the remote repo
+	log(`Cloning ${options.repoUrl}...`);
 	try {
 		await simpleGit().clone(options.repoUrl, syncRepoDir);
 	} catch (error) {
@@ -100,13 +108,16 @@ export async function handleBootstrap(options: BootstrapOptions): Promise<Bootst
 		throw new Error(`Clone failed: check your repository URL and authentication. Details: ${msg}`);
 	}
 
+	log("Detecting repo version...");
 	const version = await detectRepoVersion(syncRepoDir);
+	log(`Repo version: v${version}`);
 	let backupDir: string | null = null;
 	let totalApplied = 0;
 
 	if (version === 2 && environments.length > 0) {
 		// v2 multi-environment mode
 		for (const env of environments) {
+			log(`Processing environment: ${env.id}`);
 			const configDir = env.id === "claude" ? claudeDir : env.getConfigDir();
 			const envHomeDir = path.dirname(configDir);
 			const repoSubdir = path.join(syncRepoDir, env.id);
@@ -140,12 +151,14 @@ export async function handleBootstrap(options: BootstrapOptions): Promise<Bootst
 			// Apply repo files to config dir
 			try {
 				const repoFiles = await scanDirectory(repoSubdir, allowlistFn);
+				log(`Found ${repoFiles.length} files for ${env.id}`);
 				for (const relativePath of repoFiles) {
 					const srcPath = path.join(repoSubdir, relativePath);
 					const destPath = path.join(configDir, relativePath);
 					await fs.mkdir(path.dirname(destPath), { recursive: true });
 					let content = await fs.readFile(srcPath, "utf-8");
 					if (needsPathRewrite(relativePath, env)) {
+						log(`Expanding paths in ${relativePath}`);
 						content = expandPathsForLocal(content, envHomeDir);
 					}
 					await fs.writeFile(destPath, content);
@@ -157,9 +170,11 @@ export async function handleBootstrap(options: BootstrapOptions): Promise<Bootst
 		}
 
 		// Install skills for all environments
+		log("Installing skills...");
 		await installSkills(claudeDir, environments);
 	} else {
 		// v1 flat mode
+		log("Using v1 flat mode");
 		await fs.mkdir(claudeDir, { recursive: true });
 
 		// Backup existing config
@@ -211,14 +226,19 @@ export function registerBootstrapCommand(program: Command): void {
 		.option("--force", "Re-clone even if sync repo already exists", false)
 		.option("--repo-path <path>", "Custom sync repo path", getSyncRepoDir())
 		.option("--claude-dir <path>", "Custom ~/.claude path", getClaudeDir())
+		.option("-v, --verbose", "Show detailed progress", false)
 		.action(
-			async (repoUrl: string, opts: { force: boolean; repoPath: string; claudeDir: string }) => {
+			async (
+				repoUrl: string,
+				opts: { force: boolean; repoPath: string; claudeDir: string; verbose: boolean },
+			) => {
 				try {
 					const result = await handleBootstrap({
 						repoUrl,
 						force: opts.force,
 						repoPath: opts.repoPath,
 						claudeDir: opts.claudeDir,
+						verbose: opts.verbose,
 					});
 					console.log(pc.green(`Bootstrapped ${result.filesApplied} files from remote`));
 					console.log(pc.green(`  Sync repo: ${result.syncRepoDir}`));
