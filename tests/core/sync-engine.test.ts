@@ -404,6 +404,107 @@ describe("core/sync-engine", () => {
 
 			expect(result.fileChanges).toHaveLength(0);
 		});
+
+		it("preserves locally modified files when remote also changed", async () => {
+			const { bareDir, claudeDir, syncRepoDir, options } = await createTestEnv(tmpDir);
+
+			// Push initial state
+			await syncPush(options);
+
+			// Simulate remote change: clone, modify, push
+			const cloneDir = path.join(tmpDir, "clone-for-merge");
+			await fs.mkdir(cloneDir, { recursive: true });
+			await simpleGit(cloneDir).clone(bareDir, ".");
+			await simpleGit(cloneDir).addConfig("user.email", "test@test.com");
+			await simpleGit(cloneDir).addConfig("user.name", "Test");
+			await fs.writeFile(path.join(cloneDir, "CLAUDE.md"), "# Remote version");
+			await addFiles(cloneDir, ["CLAUDE.md"]);
+			await commitFiles(cloneDir, "remote change");
+			await simpleGit(cloneDir).push("origin", "main");
+
+			// Modify the same file locally
+			await fs.writeFile(path.join(claudeDir, "CLAUDE.md"), "# Local version");
+
+			// Pull — should keep local version and report conflict
+			const result = await syncPull(options);
+
+			const content = await fs.readFile(path.join(claudeDir, "CLAUDE.md"), "utf-8");
+			expect(content).toBe("# Local version");
+			expect(result.conflicts).toBeDefined();
+			expect(result.conflicts).toHaveLength(1);
+			expect(result.conflicts![0].path).toBe("CLAUDE.md");
+		});
+
+		it("applies remote changes when file has no local modifications", async () => {
+			const { bareDir, claudeDir, syncRepoDir, options } = await createTestEnv(tmpDir);
+
+			// Push initial state
+			await syncPush(options);
+
+			// Simulate remote change
+			const cloneDir = path.join(tmpDir, "clone-for-apply");
+			await fs.mkdir(cloneDir, { recursive: true });
+			await simpleGit(cloneDir).clone(bareDir, ".");
+			await simpleGit(cloneDir).addConfig("user.email", "test@test.com");
+			await simpleGit(cloneDir).addConfig("user.name", "Test");
+			await fs.writeFile(path.join(cloneDir, "CLAUDE.md"), "# Updated remotely");
+			await addFiles(cloneDir, ["CLAUDE.md"]);
+			await commitFiles(cloneDir, "remote update");
+			await simpleGit(cloneDir).push("origin", "main");
+
+			// Pull without local modifications — should apply remote
+			const result = await syncPull(options);
+
+			const content = await fs.readFile(path.join(claudeDir, "CLAUDE.md"), "utf-8");
+			expect(content).toBe("# Updated remotely");
+			expect(result.fileChanges.some((c) => c.path === "CLAUDE.md")).toBe(true);
+			expect(result.conflicts).toBeUndefined();
+		});
+
+		it("keeps local-only changes when remote did not modify the file", async () => {
+			const { claudeDir, options } = await createTestEnv(tmpDir);
+
+			// Push initial state
+			await syncPush(options);
+
+			// Modify locally but don't push (remote unchanged)
+			await fs.writeFile(path.join(claudeDir, "CLAUDE.md"), "# My local edit");
+
+			// Pull — remote hasn't changed CLAUDE.md, so local should be kept
+			const result = await syncPull(options);
+
+			const content = await fs.readFile(path.join(claudeDir, "CLAUDE.md"), "utf-8");
+			expect(content).toBe("# My local edit");
+			expect(result.conflicts).toBeUndefined();
+		});
+
+		it("overwrites local changes when --force is used", async () => {
+			const { bareDir, claudeDir, syncRepoDir, options } = await createTestEnv(tmpDir);
+
+			// Push initial state
+			await syncPush(options);
+
+			// Simulate remote change
+			const cloneDir = path.join(tmpDir, "clone-for-force");
+			await fs.mkdir(cloneDir, { recursive: true });
+			await simpleGit(cloneDir).clone(bareDir, ".");
+			await simpleGit(cloneDir).addConfig("user.email", "test@test.com");
+			await simpleGit(cloneDir).addConfig("user.name", "Test");
+			await fs.writeFile(path.join(cloneDir, "CLAUDE.md"), "# Force remote");
+			await addFiles(cloneDir, ["CLAUDE.md"]);
+			await commitFiles(cloneDir, "force change");
+			await simpleGit(cloneDir).push("origin", "main");
+
+			// Modify locally
+			await fs.writeFile(path.join(claudeDir, "CLAUDE.md"), "# My local edit");
+
+			// Pull with --force — should overwrite local
+			const result = await syncPull({ ...options, force: true });
+
+			const content = await fs.readFile(path.join(claudeDir, "CLAUDE.md"), "utf-8");
+			expect(content).toBe("# Force remote");
+			expect(result.conflicts).toBeUndefined();
+		});
 	});
 
 	describe("syncStatus", () => {

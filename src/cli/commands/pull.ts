@@ -15,6 +15,7 @@ export interface PullOptions {
 	dryRun?: boolean;
 	env?: string;
 	verbose?: boolean;
+	force?: boolean;
 }
 
 /**
@@ -30,6 +31,7 @@ export async function handlePull(options: PullOptions): Promise<SyncPullResult> 
 		dryRun: options.dryRun,
 		filterEnv: options.env,
 		verbose: options.verbose,
+		force: options.force,
 	});
 }
 
@@ -44,6 +46,7 @@ export function registerPullCommand(program: Command): void {
 		.option("--claude-dir <path>", "Custom ~/.claude path", getClaudeDir())
 		.option("-v, --verbose", "Show detailed file changes", false)
 		.option("-n, --dry-run", "Show what would be pulled without making changes", false)
+		.option("-f, --force", "Overwrite locally modified files instead of preserving them", false)
 		.option("--env <id>", "Only pull a specific environment (e.g., claude or opencode)")
 		.action(async (opts) => {
 			try {
@@ -62,6 +65,22 @@ export function registerPullCommand(program: Command): void {
 					console.log(pc.green(`Pulled ${result.fileChanges.length} changed files from remote`));
 				} else {
 					console.log(pc.green("Pulled from remote -- already up to date"));
+				}
+				if (result.conflicts && result.conflicts.length > 0) {
+					console.log(
+						pc.yellow(
+							`\n${result.conflicts.length} file(s) had local changes — kept local versions:`,
+						),
+					);
+					for (const c of result.conflicts) {
+						const label = c.type === "deleted" ? "(remote deleted)" : "(both modified)";
+						console.log(pc.yellow(`  ${c.path} ${label}`));
+					}
+					console.log(
+						pc.yellow(
+							"\nRun 'ai-sync push' to publish your local changes, or 'ai-sync pull --force' to overwrite.",
+						),
+					);
 				}
 				if (!result.dryRun && result.backupDir) {
 					console.log(pc.dim(`Backup saved to: ${result.backupDir}`));

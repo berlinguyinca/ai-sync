@@ -32,6 +32,8 @@ export interface SyncOptions {
 	filterEnv?: string;
 	/** When true, emit progress messages to stdout during operations. */
 	verbose?: boolean;
+	/** Force overwrite of locally modified files during pull. */
+	force?: boolean;
 }
 
 /**
@@ -66,7 +68,12 @@ export interface SyncPullResult {
 	filesApplied: number;
 	message: string;
 	fileChanges: FileChange[];
-	perEnvironment?: Record<string, { filesApplied: number; fileChanges: FileChange[] }>;
+	/** Files skipped because both local and remote had changes (merge conflict). */
+	conflicts?: FileChange[];
+	perEnvironment?: Record<
+		string,
+		{ filesApplied: number; fileChanges: FileChange[]; conflicts?: FileChange[] }
+	>;
 	/** Errors encountered per environment (non-fatal). */
 	errors?: Record<string, string>;
 	/** True when --dry-run was used. */
@@ -353,16 +360,39 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 	const version = await detectRepoVersion(syncRepoDir);
 	verboseLog(options, `Repo version: v${version}`);
 	const allFileChanges: FileChange[] = [];
+	const allConflicts: FileChange[] = [];
 	let backupDir = "";
 	let totalApplied = 0;
-	const perEnvironment: Record<string, { filesApplied: number; fileChanges: FileChange[] }> = {};
+	const perEnvironment: Record<
+		string,
+		{ filesApplied: number; fileChanges: FileChange[]; conflicts?: FileChange[] }
+	> = {};
 	const errors: Record<string, string> = {};
 	const envs = options.filterEnv
 		? (options.environments ?? []).filter((e) => e.id === options.filterEnv)
 		: (options.environments ?? []);
 
 	if (envs.length > 0 && version === 2) {
-		// v2 multi-environment mode: backup all environments first
+		// v2 multi-environment mode
+
+		// Phase 1: Snapshot repo state BEFORE pull for 3-way merge detection
+		const prePullContents = new Map<string, Map<string, string>>();
+		for (const env of envs) {
+			const repoSubdir = getRepoSubdir(syncRepoDir, env.id, 2);
+			const allowlistFn = makeAllowlistFn(env);
+			const contents = new Map<string, string>();
+			try {
+				const repoFiles = await scanDirectory(repoSubdir, allowlistFn);
+				for (const f of repoFiles) {
+					contents.set(f, await fs.readFile(path.join(repoSubdir, f), "utf-8"));
+				}
+			} catch {
+				// Repo subdir doesn't exist yet
+			}
+			prePullContents.set(env.id, contents);
+		}
+
+		// Phase 2: Backup all environments, then pull
 		if (!options.dryRun) {
 			verboseLog(options, "Creating backup of current config...");
 			const backupBaseDir = path.join(path.dirname(syncRepoDir), ".ai-sync-backups");
@@ -400,7 +430,7 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 			await fetchRemote(syncRepoDir);
 		}
 
-		// Apply (or preview) files per environment
+		// Phase 3: Apply files per environment with merge detection
 		for (const env of envs) {
 			try {
 				verboseLog(options, `Processing environment: ${env.id}`);
@@ -409,58 +439,172 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 				const repoSubdir = getRepoSubdir(syncRepoDir, env.id, 2);
 				const allowlistFn = makeAllowlistFn(env);
 				const envChanges: FileChange[] = [];
+				const envConflicts: FileChange[] = [];
+				const prePull = prePullContents.get(env.id) ?? new Map<string, string>();
 
+				let repoFiles: string[] = [];
 				try {
 					await fs.access(repoSubdir);
+					repoFiles = await scanDirectory(repoSubdir, allowlistFn);
 				} catch {
 					// No files for this environment in repo
 					perEnvironment[env.id] = { filesApplied: 0, fileChanges: [] };
 					continue;
 				}
 
-				const repoFiles = await scanDirectory(repoSubdir, allowlistFn);
 				verboseLog(options, `Found ${repoFiles.length} files in repo for ${env.id}`);
 
 				if (!options.dryRun) {
 					await fs.mkdir(configDir, { recursive: true });
 				}
 
+				const repoFileSet = new Set(repoFiles);
+
 				for (const relativePath of repoFiles) {
 					const srcPath = path.join(repoSubdir, relativePath);
 					const destPath = path.join(configDir, relativePath);
-					let content = await fs.readFile(srcPath, "utf-8");
-					if (needsPathRewrite(relativePath, env)) {
+					const rewrite = needsPathRewrite(relativePath, env);
+					let remoteContent = await fs.readFile(srcPath, "utf-8");
+					if (rewrite) {
 						verboseLog(options, `Expanding paths in ${relativePath}`);
-						content = expandPathsForLocal(content, homeDir);
+						remoteContent = expandPathsForLocal(remoteContent, homeDir);
 					}
 
-					let changeType: FileChange["type"] | null = null;
+					// Read local file content
+					let localContent: string | null = null;
 					try {
-						const existing = await fs.readFile(destPath, "utf-8");
-						if (existing !== content) changeType = "modified";
+						localContent = await fs.readFile(destPath, "utf-8");
 					} catch {
-						changeType = "added";
+						// File doesn't exist locally
 					}
-					if (!options.dryRun) {
-						await fs.mkdir(path.dirname(destPath), { recursive: true });
-						await fs.writeFile(destPath, content);
-					}
-					if (changeType) {
-						envChanges.push({ path: relativePath, type: changeType });
-						allFileChanges.push({ path: `${env.id}/${relativePath}`, type: changeType });
+
+					// Get pre-pull base content (expanded for comparison)
+					const rawBase = prePull.get(relativePath);
+					const baseContent =
+						rawBase !== undefined
+							? rewrite
+								? expandPathsForLocal(rawBase, homeDir)
+								: rawBase
+							: null;
+
+					if (localContent === null || baseContent === null) {
+						// New file from remote or first sync — apply it
+						const changeType: FileChange["type"] =
+							localContent === null ? "added" : "modified";
+						const needsWrite =
+							localContent === null || localContent !== remoteContent;
+						if (needsWrite) {
+							if (!options.dryRun) {
+								await fs.mkdir(path.dirname(destPath), { recursive: true });
+								await fs.writeFile(destPath, remoteContent);
+							}
+							envChanges.push({ path: relativePath, type: changeType });
+							allFileChanges.push({
+								path: `${env.id}/${relativePath}`,
+								type: changeType,
+							});
+						}
+					} else {
+						// File exists both locally and in repo pre-pull: 3-way merge
+						const localChanged = localContent !== baseContent;
+						const remoteChanged = remoteContent !== baseContent;
+
+						if (!localChanged) {
+							// No local modifications — safe to apply remote
+							if (remoteChanged) {
+								if (!options.dryRun) {
+									await fs.mkdir(path.dirname(destPath), { recursive: true });
+									await fs.writeFile(destPath, remoteContent);
+								}
+								envChanges.push({ path: relativePath, type: "modified" });
+								allFileChanges.push({
+									path: `${env.id}/${relativePath}`,
+									type: "modified",
+								});
+							}
+						} else if (!remoteChanged) {
+							// Only local changes — keep local version
+							verboseLog(options, `Keeping local changes: ${relativePath}`);
+						} else if (options.force) {
+							// Both changed + --force — overwrite with remote
+							if (!options.dryRun) {
+								await fs.mkdir(path.dirname(destPath), { recursive: true });
+								await fs.writeFile(destPath, remoteContent);
+							}
+							envChanges.push({ path: relativePath, type: "modified" });
+							allFileChanges.push({
+								path: `${env.id}/${relativePath}`,
+								type: "modified",
+							});
+						} else {
+							// Both changed — conflict, keep local version
+							verboseLog(
+								options,
+								`Conflict (keeping local): ${relativePath}`,
+							);
+							envConflicts.push({ path: relativePath, type: "modified" });
+							allConflicts.push({
+								path: `${env.id}/${relativePath}`,
+								type: "modified",
+							});
+						}
 					}
 				}
 
-				// Remove local files that no longer exist in the repo
+				// Handle deletions: remove local files no longer in repo
 				if (!options.dryRun) {
 					try {
 						const localFiles = await scanDirectory(configDir, allowlistFn);
-						const repoFileSet = new Set(repoFiles);
 						for (const localFile of localFiles) {
 							if (!repoFileSet.has(localFile)) {
-								await fs.rm(path.join(configDir, localFile));
-								envChanges.push({ path: localFile, type: "deleted" });
-								allFileChanges.push({ path: `${env.id}/${localFile}`, type: "deleted" });
+								const wasInRepo = prePull.has(localFile);
+								if (!wasInRepo) {
+									// Never in repo — local-only file, leave it alone
+									continue;
+								}
+								// Remote deleted this file — check for local modifications
+								let localModified = false;
+								try {
+									const localData = await fs.readFile(
+										path.join(configDir, localFile),
+										"utf-8",
+									);
+									const rawBase = prePull.get(localFile);
+									const baseData =
+										rawBase !== undefined &&
+										needsPathRewrite(localFile, env)
+											? expandPathsForLocal(rawBase, homeDir)
+											: rawBase;
+									localModified =
+										localData !== undefined && localData !== baseData;
+								} catch {
+									// Can't read, treat as unmodified
+								}
+
+								if (localModified && !options.force) {
+									verboseLog(
+										options,
+										`Conflict (remote deleted, local modified): ${localFile}`,
+									);
+									envConflicts.push({
+										path: localFile,
+										type: "deleted",
+									});
+									allConflicts.push({
+										path: `${env.id}/${localFile}`,
+										type: "deleted",
+									});
+								} else {
+									await fs.rm(path.join(configDir, localFile));
+									envChanges.push({
+										path: localFile,
+										type: "deleted",
+									});
+									allFileChanges.push({
+										path: `${env.id}/${localFile}`,
+										type: "deleted",
+									});
+								}
 							}
 						}
 					} catch {
@@ -469,7 +613,11 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 				}
 
 				totalApplied += repoFiles.length;
-				perEnvironment[env.id] = { filesApplied: repoFiles.length, fileChanges: envChanges };
+				perEnvironment[env.id] = {
+					filesApplied: repoFiles.length,
+					fileChanges: envChanges,
+					conflicts: envConflicts.length > 0 ? envConflicts : undefined,
+				};
 			} catch (err) {
 				errors[env.id] = err instanceof Error ? err.message : String(err);
 				perEnvironment[env.id] = { filesApplied: 0, fileChanges: [] };
@@ -479,6 +627,17 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 		// v1 flat mode or single-environment fallback
 		verboseLog(options, "Using v1 flat mode");
 		const { claudeDir, homeDir } = resolveLegacyPaths(options);
+
+		// Snapshot repo state before pull for merge detection
+		const v1PrePull = new Map<string, string>();
+		try {
+			const prePullFiles = await scanDirectory(syncRepoDir);
+			for (const f of prePullFiles) {
+				v1PrePull.set(f, await fs.readFile(path.join(syncRepoDir, f), "utf-8"));
+			}
+		} catch {
+			// Repo might not have files yet
+		}
 
 		// Create backup
 		verboseLog(options, "Creating backup of current config...");
@@ -503,36 +662,103 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 		verboseLog(options, "Scanning repo for files to apply...");
 		const repoFiles = await scanDirectory(syncRepoDir);
 		verboseLog(options, `Found ${repoFiles.length} files in repo`);
+		const repoFileSet = new Set(repoFiles);
 
 		for (const relativePath of repoFiles) {
 			const srcPath = path.join(syncRepoDir, relativePath);
 			const destPath = path.join(claudeDir, relativePath);
-			await fs.mkdir(path.dirname(destPath), { recursive: true });
-			let content = await fs.readFile(srcPath, "utf-8");
-			if (path.basename(relativePath) === "settings.json") {
-				content = expandPathsForLocal(content, homeDir);
+			const isSettings = path.basename(relativePath) === "settings.json";
+			let remoteContent = await fs.readFile(srcPath, "utf-8");
+			if (isSettings) {
+				remoteContent = expandPathsForLocal(remoteContent, homeDir);
 			}
 
-			let changeType: FileChange["type"] | null = null;
+			// Read local file
+			let localContent: string | null = null;
 			try {
-				const existing = await fs.readFile(destPath, "utf-8");
-				if (existing !== content) changeType = "modified";
+				localContent = await fs.readFile(destPath, "utf-8");
 			} catch {
-				changeType = "added";
+				// Doesn't exist locally
 			}
-			await fs.writeFile(destPath, content);
-			if (changeType) {
-				allFileChanges.push({ path: relativePath, type: changeType });
+
+			// Get pre-pull base (expanded for comparison)
+			const rawBase = v1PrePull.get(relativePath);
+			const baseContent =
+				rawBase !== undefined && isSettings
+					? expandPathsForLocal(rawBase, homeDir)
+					: rawBase ?? null;
+
+			if (localContent === null || baseContent === null) {
+				// New file — apply
+				const changeType: FileChange["type"] =
+					localContent === null ? "added" : "modified";
+				const needsWrite =
+					localContent === null || localContent !== remoteContent;
+				if (needsWrite) {
+					await fs.mkdir(path.dirname(destPath), { recursive: true });
+					await fs.writeFile(destPath, remoteContent);
+					allFileChanges.push({ path: relativePath, type: changeType });
+				}
+			} else {
+				const localChanged = localContent !== baseContent;
+				const remoteChanged = remoteContent !== baseContent;
+
+				if (!localChanged) {
+					if (remoteChanged) {
+						await fs.mkdir(path.dirname(destPath), { recursive: true });
+						await fs.writeFile(destPath, remoteContent);
+						allFileChanges.push({ path: relativePath, type: "modified" });
+					}
+				} else if (!remoteChanged) {
+					verboseLog(options, `Keeping local changes: ${relativePath}`);
+				} else if (options.force) {
+					await fs.mkdir(path.dirname(destPath), { recursive: true });
+					await fs.writeFile(destPath, remoteContent);
+					allFileChanges.push({ path: relativePath, type: "modified" });
+				} else {
+					verboseLog(
+						options,
+						`Conflict (keeping local): ${relativePath}`,
+					);
+					allConflicts.push({ path: relativePath, type: "modified" });
+				}
 			}
 		}
 
 		// Remove local files that no longer exist in the repo (propagate deletions)
 		const localFiles = await scanDirectory(claudeDir);
-		const repoFileSet = new Set(repoFiles);
 		for (const localFile of localFiles) {
 			if (!repoFileSet.has(localFile)) {
-				await fs.rm(path.join(claudeDir, localFile));
-				allFileChanges.push({ path: localFile, type: "deleted" });
+				const wasInRepo = v1PrePull.has(localFile);
+				if (!wasInRepo) continue;
+
+				let localModified = false;
+				try {
+					const localData = await fs.readFile(
+						path.join(claudeDir, localFile),
+						"utf-8",
+					);
+					const rawBase = v1PrePull.get(localFile);
+					const isSettings = path.basename(localFile) === "settings.json";
+					const baseData =
+						rawBase !== undefined && isSettings
+							? expandPathsForLocal(rawBase, homeDir)
+							: rawBase;
+					localModified = localData !== undefined && localData !== baseData;
+				} catch {
+					// Can't read
+				}
+
+				if (localModified && !options.force) {
+					verboseLog(
+						options,
+						`Conflict (remote deleted, local modified): ${localFile}`,
+					);
+					allConflicts.push({ path: localFile, type: "deleted" });
+				} else {
+					await fs.rm(path.join(claudeDir, localFile));
+					allFileChanges.push({ path: localFile, type: "deleted" });
+				}
 			}
 		}
 
@@ -541,13 +767,19 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 
 	const hasErrors = Object.keys(errors).length > 0;
 
+	const conflictSuffix =
+		allConflicts.length > 0
+			? ` (${allConflicts.length} conflict(s) — local changes preserved, push first then pull)`
+			: "";
+
 	return {
 		backupDir,
 		filesApplied: totalApplied,
 		message: options.dryRun
-			? `Dry run: ${allFileChanges.length} file(s) would be applied`
-			: `Applied ${totalApplied} files from remote. Backup at: ${backupDir}`,
+			? `Dry run: ${allFileChanges.length} file(s) would be applied${conflictSuffix}`
+			: `Applied ${totalApplied} files from remote. Backup at: ${backupDir}${conflictSuffix}`,
 		fileChanges: allFileChanges,
+		conflicts: allConflicts.length > 0 ? allConflicts : undefined,
 		perEnvironment: Object.keys(perEnvironment).length > 0 ? perEnvironment : undefined,
 		errors: hasErrors ? errors : undefined,
 		dryRun: options.dryRun,
