@@ -1,6 +1,6 @@
 {
 	"name": "ai-sync",
-	"version": "0.2.0",
+	"version": "0.2.1",
 	"type": "module",
 	"bin": {
 		"ai-sync": "./dist/cli.js"
