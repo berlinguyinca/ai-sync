@@ -4,7 +4,7 @@ set -euo pipefail
 # ai-sync online installer
 # Usage: curl -fsSL https://raw.githubusercontent.com/berlinguyinca/ai-sync/main/install.sh | bash
 
-REPO="berlinguyinca/ai-sync"
+REPO="johnzastrow/ai-sync"
 PINNED_VERSION="v0.2.0"   # Updated on each release — pinned to avoid pulling unreviewed main
 INSTALL_DIR="${AI_SYNC_INSTALL_DIR:-${CLAUDE_SYNC_INSTALL_DIR:-$HOME/.ai-sync-cli}}"
 SYNC_DIR="$HOME/.ai-sync"
