@@ -1,5 +1,6 @@
 import * as os from "node:os";
 import * as path from "node:path";
+import { getCodexConfigDir } from "../platform/paths.js";
 
 /**
  * Represents an AI tool environment (e.g., Claude Code, OpenCode) whose
@@ -46,6 +47,8 @@ export class ClaudeEnvironment implements Environment {
 			"package.json",
 			"gsd-file-manifest.json",
 			"skills/",
+			"rules/",
+			"keybindings.json",
 		];
 	}
 
@@ -70,6 +73,38 @@ export class ClaudeEnvironment implements Environment {
 
 	getSkillsSubdir(): string | null {
 		return "commands";
+	}
+}
+
+/**
+ * Codex environment — config lives at CODEX_HOME or ~/.codex
+ */
+export class CodexEnvironment implements Environment {
+	readonly id = "codex";
+	readonly displayName = "Codex";
+
+	getConfigDir(): string {
+		return getCodexConfigDir();
+	}
+
+	getSyncTargets(): readonly string[] {
+		return ["config.toml", "automations/"];
+	}
+
+	getPluginSyncPatterns(): readonly string[] {
+		return [];
+	}
+
+	getIgnorePatterns(): readonly string[] {
+		return [];
+	}
+
+	getPathRewriteTargets(): string[] {
+		return ["config.toml"];
+	}
+
+	getSkillsSubdir(): string | null {
+		return null;
 	}
 }
 
@@ -151,6 +186,7 @@ export class AntigravityEnvironment implements Environment {
 /** All known environments. */
 export const ALL_ENVIRONMENTS: readonly Environment[] = [
 	new ClaudeEnvironment(),
+	new CodexEnvironment(),
 	new OpenCodeEnvironment(),
 	new AntigravityEnvironment(),
 ];

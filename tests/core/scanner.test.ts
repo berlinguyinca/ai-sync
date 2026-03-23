@@ -80,6 +80,22 @@ describe("scanner", () => {
 		expect(result).toContain("hooks/pre-commit.sh");
 	});
 
+	it("includes files under rules/ directory", async () => {
+		await createFile("rules/context7.md", "# Context7 rules");
+		await createFile("rules/team/coding-standards.md", "# Team standards");
+
+		const result = await scanDirectory(tmpDir);
+		expect(result).toContain("rules/context7.md");
+		expect(result).toContain("rules/team/coding-standards.md");
+	});
+
+	it("includes keybindings.json when present", async () => {
+		await createFile("keybindings.json", '{"bindings": []}');
+
+		const result = await scanDirectory(tmpDir);
+		expect(result).toContain("keybindings.json");
+	});
+
 	it("follows symlinked files", async () => {
 		await createFile("CLAUDE.md", "# Real file");
 		// Create a symlink to an allowed file

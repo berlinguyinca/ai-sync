@@ -29,6 +29,14 @@ export function getClaudeDir(): string {
 }
 
 /**
+ * Returns the path to the Codex home directory.
+ * Respects CODEX_HOME if set.
+ */
+export function getCodexConfigDir(): string {
+	return process.env.CODEX_HOME || path.join(getHomeDir(), ".codex");
+}
+
+/**
  * Returns the path to the Antigravity config directory (~/.antigravity).
  */
 export function getAntigravityConfigDir(): string {

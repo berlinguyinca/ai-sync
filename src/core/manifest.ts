@@ -13,6 +13,8 @@ export const DEFAULT_SYNC_TARGETS: readonly string[] = [
 	"package.json",
 	"gsd-file-manifest.json",
 	"skills/",
+	"rules/",
+	"keybindings.json",
 ] as const;
 
 /**

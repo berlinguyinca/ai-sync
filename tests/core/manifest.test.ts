@@ -8,8 +8,8 @@ import {
 
 describe("manifest", () => {
 	describe("DEFAULT_SYNC_TARGETS", () => {
-		it("contains exactly 9 sync targets", () => {
-			expect(DEFAULT_SYNC_TARGETS).toHaveLength(9);
+		it("contains exactly 11 sync targets", () => {
+			expect(DEFAULT_SYNC_TARGETS).toHaveLength(11);
 		});
 
 		it("contains the expected sync targets", () => {
@@ -23,6 +23,8 @@ describe("manifest", () => {
 				"package.json",
 				"gsd-file-manifest.json",
 				"skills/",
+				"rules/",
+				"keybindings.json",
 			];
 			expect([...DEFAULT_SYNC_TARGETS].sort()).toEqual([...expected].sort());
 		});
@@ -67,6 +69,18 @@ describe("manifest", () => {
 
 		it("allows files under skills/ directory", () => {
 			expect(isPathAllowed("skills/autoresearch/SKILL.md")).toBe(true);
+		});
+
+		it("allows files under rules/ directory", () => {
+			expect(isPathAllowed("rules/context7.md")).toBe(true);
+		});
+
+		it("allows nested files under rules/ directory", () => {
+			expect(isPathAllowed("rules/team/coding-standards.md")).toBe(true);
+		});
+
+		it("allows keybindings.json", () => {
+			expect(isPathAllowed("keybindings.json")).toBe(true);
 		});
 
 		it("allows plugins/installed_plugins.json", () => {

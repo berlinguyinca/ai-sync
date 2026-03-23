@@ -1,9 +1,10 @@
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { Command } from "commander";
 import { simpleGit } from "simple-git";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { handleInit } from "../../src/cli/commands/init.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { handleInit, registerInitCommand } from "../../src/cli/commands/init.js";
 import { isGitRepo } from "../../src/git/repo.js";
 
 /**
@@ -192,5 +193,63 @@ describe("init command (integration)", () => {
 		// We created 5 allowlisted files: settings.json, CLAUDE.md, agents/default.md, commands/review.md, hooks/pre-commit.js
 		expect(result.filesSynced).toBe(5);
 		expect(result.filesExcluded).toBeGreaterThan(0);
+	});
+});
+
+describe("init CLI action (integration)", () => {
+	let tmpDir: string;
+	let claudeDir: string;
+	let logSpy: ReturnType<typeof vi.spyOn>;
+	let errorSpy: ReturnType<typeof vi.spyOn>;
+	let savedExitCode: number | undefined;
+
+	beforeEach(async () => {
+		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "init-cli-test-"));
+		claudeDir = await createMockClaudeDir(tmpDir);
+		logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+		savedExitCode = process.exitCode;
+		process.exitCode = undefined;
+	});
+
+	afterEach(async () => {
+		logSpy.mockRestore();
+		errorSpy.mockRestore();
+		process.exitCode = savedExitCode;
+		await fs.rm(tmpDir, { recursive: true, force: true });
+	});
+
+	function createProgram(): Command {
+		const program = new Command();
+		program.exitOverride();
+		registerInitCommand(program);
+		return program;
+	}
+
+	it("prints success message with file counts", async () => {
+		const syncRepoDir = path.join(tmpDir, "sync-repo");
+		const program = createProgram();
+
+		await program.parseAsync(["node", "test", "init", "--repo-path", syncRepoDir]);
+
+		const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+		expect(output).toContain("Sync repo initialized");
+		expect(output).toContain("Files synced:");
+		expect(output).toContain("Files excluded:");
+	});
+
+	it("prints error and sets exitCode on duplicate init", async () => {
+		const syncRepoDir = path.join(tmpDir, "sync-repo");
+		// Init first via handler
+		await handleInit({ repoPath: syncRepoDir, claudeDir });
+
+		const program = createProgram();
+		logSpy.mockClear();
+
+		await program.parseAsync(["node", "test", "init", "--repo-path", syncRepoDir]);
+
+		const errOutput = errorSpy.mock.calls.map((c) => c[0]).join("\n");
+		expect(errOutput).toContain("already exists");
+		expect(process.exitCode).toBe(1);
 	});
 });

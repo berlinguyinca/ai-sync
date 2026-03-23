@@ -113,8 +113,12 @@ export async function handleInit(options: InitOptions): Promise<InitResult> {
 			await commitFiles(syncRepoDir, "feat: initial sync of config");
 		}
 
-		// Install skills for all environments
-		await installSkills(claudeDir, environments);
+		// Best effort: init should still succeed even if skill installation fails
+		try {
+			await installSkills(claudeDir, environments);
+		} catch {
+			// Ignore skill install failures here; users can run install-skills later.
+		}
 	} else {
 		// v1 legacy: single claude environment (fallback for no envs)
 		try {
@@ -151,7 +155,11 @@ export async function handleInit(options: InitOptions): Promise<InitResult> {
 		});
 		totalExcluded = allEntries.filter((e) => e.isFile()).length - totalCopied;
 
-		await installSkills(claudeDir);
+		try {
+			await installSkills(claudeDir);
+		} catch {
+			// Ignore skill install failures here; users can run install-skills later.
+		}
 	}
 
 	return {

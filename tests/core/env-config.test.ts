@@ -44,10 +44,10 @@ describe("env-config", () => {
 		it("reads environments from config file", () => {
 			fs.writeFileSync(
 				path.join(testInstallDir, ".environments.json"),
-				JSON.stringify(["claude", "opencode"]),
+				JSON.stringify(["claude", "codex"]),
 			);
 			const result = getEnabledEnvironments();
-			expect(result).toEqual(["claude", "opencode"]);
+			expect(result).toEqual(["claude", "codex"]);
 		});
 
 		it("falls back to auto-detect if config file is malformed", () => {
@@ -67,9 +67,9 @@ describe("env-config", () => {
 
 	describe("setEnabledEnvironments", () => {
 		it("writes environments to config file", () => {
-			setEnabledEnvironments(["claude", "opencode"]);
+			setEnabledEnvironments(["claude", "codex"]);
 			const content = fs.readFileSync(path.join(testInstallDir, ".environments.json"), "utf-8");
-			expect(JSON.parse(content)).toEqual(["claude", "opencode"]);
+			expect(JSON.parse(content)).toEqual(["claude", "codex"]);
 		});
 
 		it("throws for unknown environment id", () => {
@@ -116,11 +116,11 @@ describe("env-config", () => {
 		it("returns multiple environments when configured", () => {
 			fs.writeFileSync(
 				path.join(testInstallDir, ".environments.json"),
-				JSON.stringify(["claude", "opencode"]),
+				JSON.stringify(["claude", "codex"]),
 			);
 			const instances = getEnabledEnvironmentInstances();
 			expect(instances).toHaveLength(2);
-			expect(instances.map((e) => e.id)).toEqual(["claude", "opencode"]);
+			expect(instances.map((e) => e.id)).toEqual(["claude", "codex"]);
 		});
 	});
 });
