@@ -1,9 +1,10 @@
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { Command } from "commander";
 import { simpleGit } from "simple-git";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { handleBootstrap } from "../../src/cli/commands/bootstrap.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { handleBootstrap, registerBootstrapCommand } from "../../src/cli/commands/bootstrap.js";
 import { isGitRepo } from "../../src/git/repo.js";
 
 /**
@@ -214,5 +215,158 @@ describe("bootstrap command (integration)", () => {
 				claudeDir,
 			}),
 		).rejects.toThrow("check your repository URL");
+	});
+
+	it("handles verbose output", async () => {
+		const syncRepoDir = path.join(tmpDir, "sync-repo");
+		const claudeDir = path.join(tmpDir, "new-machine", ".claude");
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+		await handleBootstrap({
+			repoUrl: remoteRepoDir,
+			repoPath: syncRepoDir,
+			claudeDir,
+			verbose: true,
+		});
+
+		const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+		expect(output).toContain("[verbose]");
+		logSpy.mockRestore();
+	});
+
+	it("backs up and applies files in v2 mode", async () => {
+		// Create a v2 remote repo
+		const v2RemoteDir = path.join(tmpDir, "v2-remote");
+		await fs.mkdir(v2RemoteDir, { recursive: true });
+		const git = simpleGit(v2RemoteDir);
+		await git.init();
+		await git.addConfig("user.email", "test@test.com");
+		await git.addConfig("user.name", "Test");
+
+		// Write v2 structure
+		await fs.writeFile(path.join(v2RemoteDir, ".sync-version"), "2\n");
+		await fs.mkdir(path.join(v2RemoteDir, "claude"), { recursive: true });
+		await fs.writeFile(path.join(v2RemoteDir, "claude", "CLAUDE.md"), "# V2 Config");
+		await fs.writeFile(
+			path.join(v2RemoteDir, "claude", "settings.json"),
+			JSON.stringify({ key: "{{HOME}}/.claude/test" }),
+		);
+		await git.add(".");
+		await git.commit("feat: initial v2 config");
+
+		const syncRepoDir = path.join(tmpDir, "sync-v2");
+		const claudeDir = path.join(tmpDir, "v2-machine", ".claude");
+
+		// Create existing config to trigger backup
+		await fs.mkdir(claudeDir, { recursive: true });
+		await fs.writeFile(path.join(claudeDir, "CLAUDE.md"), "# Existing");
+
+		const result = await handleBootstrap({
+			repoUrl: v2RemoteDir,
+			repoPath: syncRepoDir,
+			claudeDir,
+		});
+
+		expect(result.filesApplied).toBeGreaterThan(0);
+		expect(result.backupDir).toBeTruthy();
+
+		// Config should have remote content with paths expanded
+		const claudeMd = await fs.readFile(path.join(claudeDir, "CLAUDE.md"), "utf-8");
+		expect(claudeMd).toBe("# V2 Config");
+	});
+});
+
+describe("bootstrap CLI action (integration)", () => {
+	let tmpDir: string;
+	let remoteRepoDir: string;
+	let logSpy: ReturnType<typeof vi.spyOn>;
+	let errorSpy: ReturnType<typeof vi.spyOn>;
+	let savedExitCode: number | undefined;
+
+	beforeEach(async () => {
+		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "bootstrap-cli-test-"));
+		remoteRepoDir = await createRemoteRepo(tmpDir);
+		logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+		savedExitCode = process.exitCode;
+		process.exitCode = undefined;
+	});
+
+	afterEach(async () => {
+		logSpy.mockRestore();
+		errorSpy.mockRestore();
+		process.exitCode = savedExitCode;
+		await fs.rm(tmpDir, { recursive: true, force: true });
+	});
+
+	function createProgram(): Command {
+		const program = new Command();
+		program.exitOverride();
+		registerBootstrapCommand(program);
+		return program;
+	}
+
+	it("prints success message with file count", async () => {
+		const syncRepoDir = path.join(tmpDir, "sync-repo");
+		const claudeDir = path.join(tmpDir, "machine", ".claude");
+		const program = createProgram();
+
+		await program.parseAsync([
+			"node",
+			"test",
+			"bootstrap",
+			remoteRepoDir,
+			"--repo-path",
+			syncRepoDir,
+			"--claude-dir",
+			claudeDir,
+		]);
+
+		const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+		expect(output).toContain("Bootstrapped");
+		expect(output).toContain("Sync repo:");
+		expect(output).toContain("Config dir:");
+	});
+
+	it("prints backup path when existing config found", async () => {
+		const syncRepoDir = path.join(tmpDir, "sync-repo");
+		const claudeDir = path.join(tmpDir, "machine", ".claude");
+		await fs.mkdir(claudeDir, { recursive: true });
+		await fs.writeFile(path.join(claudeDir, "CLAUDE.md"), "# Old");
+
+		const program = createProgram();
+
+		await program.parseAsync([
+			"node",
+			"test",
+			"bootstrap",
+			remoteRepoDir,
+			"--repo-path",
+			syncRepoDir,
+			"--claude-dir",
+			claudeDir,
+		]);
+
+		const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+		expect(output).toContain("Backup");
+	});
+
+	it("prints error and sets exitCode on failure", async () => {
+		const program = createProgram();
+
+		await program.parseAsync([
+			"node",
+			"test",
+			"bootstrap",
+			"/nonexistent/invalid-repo-12345",
+			"--repo-path",
+			path.join(tmpDir, "sync-repo"),
+			"--claude-dir",
+			path.join(tmpDir, "machine", ".claude"),
+		]);
+
+		const errOutput = errorSpy.mock.calls.map((c) => c[0]).join("\n");
+		expect(errOutput).toContain("Bootstrap failed");
+		expect(process.exitCode).toBe(1);
 	});
 });

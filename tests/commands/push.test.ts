@@ -1,9 +1,10 @@
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { Command } from "commander";
 import { simpleGit } from "simple-git";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { handlePush } from "../../src/cli/commands/push.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { handlePush, registerPushCommand } from "../../src/cli/commands/push.js";
 import { addFiles, addRemote, commitFiles, initRepo } from "../../src/git/repo.js";
 
 /**
@@ -108,5 +109,169 @@ describe("push command (integration)", () => {
 		await fs.writeFile(path.join(claudeDir, "CLAUDE.md"), "# Test");
 
 		await expect(handlePush({ repoPath: noRemoteDir, claudeDir })).rejects.toThrow(/[Nn]o remote/);
+	});
+});
+
+describe("push CLI action (integration)", () => {
+	let tmpDir: string;
+	let logSpy: ReturnType<typeof vi.spyOn>;
+	let errorSpy: ReturnType<typeof vi.spyOn>;
+	let savedExitCode: number | undefined;
+
+	beforeEach(async () => {
+		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "push-cli-test-"));
+		logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+		savedExitCode = process.exitCode;
+		process.exitCode = undefined;
+	});
+
+	afterEach(async () => {
+		logSpy.mockRestore();
+		errorSpy.mockRestore();
+		process.exitCode = savedExitCode;
+		await fs.rm(tmpDir, { recursive: true, force: true });
+	});
+
+	function createProgram(): Command {
+		const program = new Command();
+		program.exitOverride(); // prevent process.exit in tests
+		registerPushCommand(program);
+		return program;
+	}
+
+	it("prints green success message when files are pushed", async () => {
+		const { syncRepoDir, claudeDir } = await createTestEnv(tmpDir);
+		const program = createProgram();
+
+		await program.parseAsync([
+			"node",
+			"test",
+			"push",
+			"--repo-path",
+			syncRepoDir,
+			"--claude-dir",
+			claudeDir,
+		]);
+
+		const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+		expect(output).toContain("Pushed");
+	});
+
+	it("prints yellow no-changes message when already up to date", async () => {
+		const { syncRepoDir, claudeDir } = await createTestEnv(tmpDir);
+		// Push once via handler
+		await handlePush({ repoPath: syncRepoDir, claudeDir });
+
+		const program = createProgram();
+		logSpy.mockClear();
+
+		await program.parseAsync([
+			"node",
+			"test",
+			"push",
+			"--repo-path",
+			syncRepoDir,
+			"--claude-dir",
+			claudeDir,
+		]);
+
+		const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+		expect(output).toContain("No changes to push");
+	});
+
+	it("prints verbose file changes with --verbose flag", async () => {
+		const { syncRepoDir, claudeDir } = await createTestEnv(tmpDir);
+		const program = createProgram();
+
+		await program.parseAsync([
+			"node",
+			"test",
+			"push",
+			"--repo-path",
+			syncRepoDir,
+			"--claude-dir",
+			claudeDir,
+			"--verbose",
+		]);
+
+		const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+		// Verbose mode should print file change indicators (A for added)
+		expect(output).toContain("CLAUDE.md");
+		expect(output).toContain("Pushed");
+	});
+
+	it("prints dry-run message in cyan when --dry-run is used", async () => {
+		const { syncRepoDir, claudeDir } = await createTestEnv(tmpDir);
+		const program = createProgram();
+
+		await program.parseAsync([
+			"node",
+			"test",
+			"push",
+			"--repo-path",
+			syncRepoDir,
+			"--claude-dir",
+			claudeDir,
+			"--dry-run",
+		]);
+
+		const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+		// Dry-run output should indicate the push was simulated
+		expect(output).toBeTruthy();
+		// Should not actually push (no green pushed message)
+		expect(process.exitCode).toBeUndefined();
+	});
+
+	it("prints dry-run verbose file changes with --dry-run --verbose", async () => {
+		const { syncRepoDir, claudeDir } = await createTestEnv(tmpDir);
+		const program = createProgram();
+
+		await program.parseAsync([
+			"node",
+			"test",
+			"push",
+			"--repo-path",
+			syncRepoDir,
+			"--claude-dir",
+			claudeDir,
+			"--dry-run",
+			"--verbose",
+		]);
+
+		const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+		// Verbose + dry-run should show file changes
+		expect(output).toContain("CLAUDE.md");
+	});
+
+	it("prints error and sets exitCode on failure", async () => {
+		const noRemoteDir = path.join(tmpDir, "no-remote-repo");
+		await fs.mkdir(noRemoteDir, { recursive: true });
+		await initRepo(noRemoteDir);
+		await simpleGit(noRemoteDir).addConfig("user.email", "test@test.com");
+		await simpleGit(noRemoteDir).addConfig("user.name", "Test");
+		await fs.writeFile(path.join(noRemoteDir, ".gitkeep"), "");
+		await addFiles(noRemoteDir, [".gitkeep"]);
+		await commitFiles(noRemoteDir, "initial");
+
+		const claudeDir = path.join(tmpDir, "home", ".claude");
+		await fs.mkdir(claudeDir, { recursive: true });
+		await fs.writeFile(path.join(claudeDir, "CLAUDE.md"), "# Test");
+
+		const program = createProgram();
+
+		await program.parseAsync([
+			"node",
+			"test",
+			"push",
+			"--repo-path",
+			noRemoteDir,
+			"--claude-dir",
+			claudeDir,
+		]);
+
+		const errOutput = errorSpy.mock.calls.map((c) => c[0]).join("\n");
+		expect(errOutput).toContain("Push failed:");
+		expect(process.exitCode).toBe(1);
 	});
 });

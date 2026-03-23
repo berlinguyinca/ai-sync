@@ -1,9 +1,11 @@
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { Command } from "commander";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ClaudeEnvironment } from "../../src/core/environment.js";
 import { installSkills } from "../../src/core/skills.js";
+import { registerInstallSkillsCommand } from "../../src/cli/commands/install-skills.js";
 
 describe("install-skills", () => {
 	let tmpDir: string;
@@ -86,5 +88,68 @@ describe("install-skills", () => {
 		// Verify directory was created
 		const stat = await fs.stat(path.join(claudeDir, "commands"));
 		expect(stat.isDirectory()).toBe(true);
+	});
+});
+
+describe("install-skills CLI wrapper (registerInstallSkillsCommand)", () => {
+	let tmpDir: string;
+	let program: Command;
+	let logSpy: ReturnType<typeof vi.spyOn>;
+	let errorSpy: ReturnType<typeof vi.spyOn>;
+
+	beforeEach(async () => {
+		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "install-skills-cli-test-"));
+		program = new Command();
+		program.exitOverride();
+		registerInstallSkillsCommand(program);
+		logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+	});
+
+	afterEach(async () => {
+		await fs.rm(tmpDir, { recursive: true, force: true });
+		logSpy.mockRestore();
+		errorSpy.mockRestore();
+		process.exitCode = undefined;
+	});
+
+	it("runs install-skills and prints output about skills", async () => {
+		const claudeDir = path.join(tmpDir, ".claude");
+		await fs.mkdir(claudeDir, { recursive: true });
+
+		await program.parseAsync(["node", "test", "install-skills", "--claude-dir", claudeDir]);
+
+		const output = logSpy.mock.calls.map((c) => String(c[0])).join("\n");
+		// The handler either prints "Installed skills" or "Already up to date" depending
+		// on whether skills already exist on this machine (env instances point to real config dirs).
+		// Either way, sync.md should appear in the output.
+		expect(output).toContain("sync.md");
+		expect(output).toMatch(/Installed skills|up to date/);
+	});
+
+	it("runs install-skills twice — second run reports up-to-date", async () => {
+		const claudeDir = path.join(tmpDir, ".claude");
+		await fs.mkdir(claudeDir, { recursive: true });
+
+		// First install
+		await program.parseAsync(["node", "test", "install-skills", "--claude-dir", claudeDir]);
+		logSpy.mockClear();
+
+		// Second install — new program instance needed since Commander tracks state
+		const program2 = new Command();
+		program2.exitOverride();
+		registerInstallSkillsCommand(program2);
+		await program2.parseAsync(["node", "test", "install-skills", "--claude-dir", claudeDir]);
+
+		const output = logSpy.mock.calls.map((c) => String(c[0])).join("\n");
+		expect(output).toContain("up to date");
+	});
+
+	it("does not throw and does not set exitCode on success", async () => {
+		const claudeDir = path.join(tmpDir, ".claude");
+		await fs.mkdir(claudeDir, { recursive: true });
+
+		await program.parseAsync(["node", "test", "install-skills", "--claude-dir", claudeDir]);
+		expect(process.exitCode).toBeUndefined();
 	});
 });

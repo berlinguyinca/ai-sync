@@ -1,10 +1,11 @@
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { Command } from "commander";
 import { simpleGit } from "simple-git";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { handlePush } from "../../src/cli/commands/push.js";
-import { handleStatus } from "../../src/cli/commands/status.js";
+import { handleStatus, registerStatusCommand } from "../../src/cli/commands/status.js";
 import { addFiles, addRemote, commitFiles, initRepo } from "../../src/git/repo.js";
 
 /**
@@ -143,5 +144,245 @@ describe("status command (integration)", () => {
 		expect(result.hasRemote).toBe(false);
 		expect(result.remoteDrift.ahead).toBe(0);
 		expect(result.remoteDrift.behind).toBe(0);
+	});
+});
+
+describe("status CLI action (integration)", () => {
+	let tmpDir: string;
+	let logSpy: ReturnType<typeof vi.spyOn>;
+	let errorSpy: ReturnType<typeof vi.spyOn>;
+	let savedExitCode: number | undefined;
+
+	beforeEach(async () => {
+		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "status-cli-test-"));
+		logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+		savedExitCode = process.exitCode;
+		process.exitCode = undefined;
+	});
+
+	afterEach(async () => {
+		logSpy.mockRestore();
+		errorSpy.mockRestore();
+		process.exitCode = savedExitCode;
+		await fs.rm(tmpDir, { recursive: true, force: true });
+	});
+
+	function createProgram(): Command {
+		const program = new Command();
+		program.exitOverride();
+		registerStatusCommand(program);
+		return program;
+	}
+
+	it("prints green 'Everything is in sync' when clean", async () => {
+		const { syncRepoDir, claudeDir } = await createTestEnv(tmpDir);
+		await handlePush({ repoPath: syncRepoDir, claudeDir });
+
+		const program = createProgram();
+		logSpy.mockClear();
+
+		await program.parseAsync([
+			"node",
+			"test",
+			"status",
+			"--repo-path",
+			syncRepoDir,
+			"--claude-dir",
+			claudeDir,
+		]);
+
+		const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+		expect(output).toContain("Everything is in sync");
+	});
+
+	it("prints local changes listing when files are modified", async () => {
+		const { syncRepoDir, claudeDir } = await createTestEnv(tmpDir);
+		await handlePush({ repoPath: syncRepoDir, claudeDir });
+
+		// Modify a local file
+		await fs.writeFile(path.join(claudeDir, "CLAUDE.md"), "# Modified content");
+
+		const program = createProgram();
+		logSpy.mockClear();
+
+		await program.parseAsync([
+			"node",
+			"test",
+			"status",
+			"--repo-path",
+			syncRepoDir,
+			"--claude-dir",
+			claudeDir,
+		]);
+
+		const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+		expect(output).toContain("Local changes:");
+		expect(output).toContain("CLAUDE.md");
+	});
+
+	it("prints excluded file count", async () => {
+		const { syncRepoDir, claudeDir } = await createTestEnv(tmpDir);
+		await handlePush({ repoPath: syncRepoDir, claudeDir });
+
+		const program = createProgram();
+		logSpy.mockClear();
+
+		await program.parseAsync([
+			"node",
+			"test",
+			"status",
+			"--repo-path",
+			syncRepoDir,
+			"--claude-dir",
+			claudeDir,
+		]);
+
+		const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+		expect(output).toContain("Excluded:");
+		expect(output).toContain("files (not in sync manifest)");
+	});
+
+	it("prints yellow 'No remote configured' when no remote", async () => {
+		const noRemoteDir = path.join(tmpDir, "no-remote-repo");
+		await fs.mkdir(noRemoteDir, { recursive: true });
+		await initRepo(noRemoteDir);
+		await simpleGit(noRemoteDir).addConfig("user.email", "test@test.com");
+		await simpleGit(noRemoteDir).addConfig("user.name", "Test");
+		await fs.writeFile(path.join(noRemoteDir, ".gitkeep"), "");
+		await addFiles(noRemoteDir, [".gitkeep"]);
+		await commitFiles(noRemoteDir, "initial");
+
+		const claudeDir = path.join(tmpDir, "home", ".claude");
+		await fs.mkdir(claudeDir, { recursive: true });
+		await fs.writeFile(path.join(claudeDir, "CLAUDE.md"), "# Test");
+
+		const program = createProgram();
+		logSpy.mockClear();
+
+		await program.parseAsync([
+			"node",
+			"test",
+			"status",
+			"--repo-path",
+			noRemoteDir,
+			"--claude-dir",
+			claudeDir,
+		]);
+
+		const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+		expect(output).toContain("No remote configured");
+	});
+
+	it("prints verbose branch and tracking info with --verbose", async () => {
+		const { syncRepoDir, claudeDir } = await createTestEnv(tmpDir);
+		await handlePush({ repoPath: syncRepoDir, claudeDir });
+
+		const program = createProgram();
+		logSpy.mockClear();
+
+		await program.parseAsync([
+			"node",
+			"test",
+			"status",
+			"--repo-path",
+			syncRepoDir,
+			"--claude-dir",
+			claudeDir,
+			"--verbose",
+		]);
+
+		const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+		expect(output).toContain("Branch:");
+		expect(output).toContain("main");
+		expect(output).toContain("Tracking:");
+		expect(output).toContain("Synced:");
+		expect(output).toContain("files");
+	});
+
+	it("prints remote drift behind message when remote is ahead", async () => {
+		const { bareDir, syncRepoDir, claudeDir } = await createTestEnv(tmpDir);
+		await handlePush({ repoPath: syncRepoDir, claudeDir });
+
+		// Simulate a remote change by cloning, committing, and pushing
+		const cloneDir = path.join(tmpDir, "clone-drift");
+		await fs.mkdir(cloneDir, { recursive: true });
+		await simpleGit(cloneDir).clone(bareDir, ".");
+		await simpleGit(cloneDir).addConfig("user.email", "test@test.com");
+		await simpleGit(cloneDir).addConfig("user.name", "Test");
+		await fs.writeFile(path.join(cloneDir, "CLAUDE.md"), "# Remote change");
+		await simpleGit(cloneDir).add("CLAUDE.md");
+		await simpleGit(cloneDir).commit("remote drift");
+		await simpleGit(cloneDir).push("origin", "main");
+
+		// Fetch so the sync repo knows about the remote change
+		await simpleGit(syncRepoDir).fetch();
+
+		const program = createProgram();
+		logSpy.mockClear();
+
+		await program.parseAsync([
+			"node",
+			"test",
+			"status",
+			"--repo-path",
+			syncRepoDir,
+			"--claude-dir",
+			claudeDir,
+		]);
+
+		const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+		expect(output).toContain("Remote is");
+		expect(output).toContain("commit(s) ahead");
+		expect(output).toContain("ai-sync pull");
+	});
+
+	it("prints local-ahead message when local has unpushed commits", async () => {
+		const { syncRepoDir, claudeDir } = await createTestEnv(tmpDir);
+		await handlePush({ repoPath: syncRepoDir, claudeDir });
+
+		// Create a local commit that is not pushed to remote
+		await fs.writeFile(path.join(syncRepoDir, "extra-file.txt"), "local only");
+		await addFiles(syncRepoDir, ["extra-file.txt"]);
+		await commitFiles(syncRepoDir, "local-only commit");
+
+		const program = createProgram();
+		logSpy.mockClear();
+
+		await program.parseAsync([
+			"node",
+			"test",
+			"status",
+			"--repo-path",
+			syncRepoDir,
+			"--claude-dir",
+			claudeDir,
+		]);
+
+		const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+		expect(output).toContain("Local is");
+		expect(output).toContain("commit(s) ahead");
+		expect(output).toContain("ai-sync push");
+	});
+
+	it("prints error and sets exitCode on failure", async () => {
+		// Use a non-existent repo path to trigger an error
+		const bogusRepoDir = path.join(tmpDir, "does-not-exist");
+
+		const program = createProgram();
+
+		await program.parseAsync([
+			"node",
+			"test",
+			"status",
+			"--repo-path",
+			bogusRepoDir,
+			"--claude-dir",
+			path.join(tmpDir, "also-missing"),
+		]);
+
+		const errOutput = errorSpy.mock.calls.map((c) => c[0]).join("\n");
+		expect(errOutput).toContain("Status failed:");
+		expect(process.exitCode).toBe(1);
 	});
 });
