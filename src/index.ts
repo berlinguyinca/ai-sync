@@ -13,6 +13,7 @@ export type { Environment } from "./core/environment.js";
 export {
 	ALL_ENVIRONMENTS,
 	ClaudeEnvironment,
+	CodexEnvironment,
 	getEnvironmentById,
 	OpenCodeEnvironment,
 } from "./core/environment.js";
@@ -58,6 +59,7 @@ export {
 } from "./git/repo.js";
 export {
 	getClaudeDir,
+	getCodexConfigDir,
 	getHomeDir,
 	getInstallDir,
 	getOpenCodeConfigDir,

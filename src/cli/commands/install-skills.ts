@@ -11,11 +11,12 @@ export function registerInstallSkillsCommand(program: Command): void {
 	program
 		.command("install-skills")
 		.description("Install slash commands (e.g., /sync) into config directories")
-		.option("--claude-dir <path>", "Custom ~/.claude path", getClaudeDir())
+		.option("--claude-dir <path>", "Custom ~/.claude path")
 		.action(async (opts) => {
 			try {
-				const environments = getEnabledEnvironmentInstances();
-				const result = await installSkills(opts.claudeDir, environments);
+				const claudeDir = opts.claudeDir ?? getClaudeDir();
+				const environments = opts.claudeDir ? undefined : getEnabledEnvironmentInstances();
+				const result = await installSkills(claudeDir, environments);
 
 				if (result.installed.length > 0) {
 					console.log(pc.green(`Installed skills: ${result.installed.join(", ")}`));

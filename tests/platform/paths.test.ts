@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	getAntigravityConfigDir,
 	getClaudeDir,
+	getCodexConfigDir,
 	getHomeDir,
 	getInstallDir,
 	getOpenCodeConfigDir,
@@ -72,6 +73,28 @@ describe("getAntigravityConfigDir", () => {
 
 	it("is a child of the home directory", () => {
 		expect(getAntigravityConfigDir().startsWith(getHomeDir())).toBe(true);
+	});
+});
+
+describe("getCodexConfigDir", () => {
+	const originalCodexHome = process.env.CODEX_HOME;
+
+	afterEach(() => {
+		if (originalCodexHome === undefined) {
+			delete process.env.CODEX_HOME;
+		} else {
+			process.env.CODEX_HOME = originalCodexHome;
+		}
+	});
+
+	it("defaults to ~/.codex when CODEX_HOME is not set", () => {
+		delete process.env.CODEX_HOME;
+		expect(getCodexConfigDir()).toBe(path.join(os.homedir(), ".codex"));
+	});
+
+	it("respects CODEX_HOME when set", () => {
+		process.env.CODEX_HOME = "/custom/codex";
+		expect(getCodexConfigDir()).toBe("/custom/codex");
 	});
 });
 

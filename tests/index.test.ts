@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
 	ALL_ENVIRONMENTS,
 	ClaudeEnvironment,
+	CodexEnvironment,
 	DEFAULT_SYNC_TARGETS,
 	OpenCodeEnvironment,
 	PLUGIN_IGNORE_PATTERNS,
@@ -9,6 +10,7 @@ import {
 	createBackup,
 	expandPathsForLocal,
 	getClaudeDir,
+	getCodexConfigDir,
 	getEnvironmentById,
 	getHomeDir,
 	getInstallDir,
@@ -66,6 +68,10 @@ describe("barrel exports (src/index.ts)", () => {
 
 		it("exports OpenCodeEnvironment as a function (class)", () => {
 			expect(typeof OpenCodeEnvironment).toBe("function");
+		});
+
+		it("exports CodexEnvironment as a function (class)", () => {
+			expect(typeof CodexEnvironment).toBe("function");
 		});
 
 		it("exports ALL_ENVIRONMENTS as an array", () => {
@@ -207,6 +213,7 @@ describe("barrel exports (src/index.ts)", () => {
 	describe("platform/paths exports", () => {
 		it("exports path utility functions", () => {
 			expect(typeof getClaudeDir).toBe("function");
+			expect(typeof getCodexConfigDir).toBe("function");
 			expect(typeof getHomeDir).toBe("function");
 			expect(typeof getInstallDir).toBe("function");
 			expect(typeof getOpenCodeConfigDir).toBe("function");

@@ -1,10 +1,11 @@
 import * as os from "node:os";
 import * as path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
 	ALL_ENVIRONMENTS,
 	AntigravityEnvironment,
 	ClaudeEnvironment,
+	CodexEnvironment,
 	getEnvironmentById,
 	OpenCodeEnvironment,
 } from "../../src/core/environment.js";
@@ -134,6 +135,61 @@ describe("environment", () => {
 		});
 	});
 
+	describe("CodexEnvironment", () => {
+		const codex = new CodexEnvironment();
+		const originalCodexHome = process.env.CODEX_HOME;
+
+		afterEach(() => {
+			if (originalCodexHome === undefined) {
+				delete process.env.CODEX_HOME;
+			} else {
+				process.env.CODEX_HOME = originalCodexHome;
+			}
+		});
+
+		it("has id 'codex'", () => {
+			expect(codex.id).toBe("codex");
+		});
+
+		it("has display name 'Codex'", () => {
+			expect(codex.displayName).toBe("Codex");
+		});
+
+		it("config dir defaults to ~/.codex", () => {
+			delete process.env.CODEX_HOME;
+			expect(codex.getConfigDir()).toBe(path.join(os.homedir(), ".codex"));
+		});
+
+		it("respects CODEX_HOME when set", () => {
+			process.env.CODEX_HOME = "/custom/codex";
+			expect(codex.getConfigDir()).toBe("/custom/codex");
+		});
+
+		it("has config.toml as sync target", () => {
+			expect(codex.getSyncTargets()).toContain("config.toml");
+		});
+
+		it("has automations/ as sync target", () => {
+			expect(codex.getSyncTargets()).toContain("automations/");
+		});
+
+		it("has no plugin sync patterns", () => {
+			expect(codex.getPluginSyncPatterns()).toHaveLength(0);
+		});
+
+		it("has no ignore patterns", () => {
+			expect(codex.getIgnorePatterns()).toHaveLength(0);
+		});
+
+		it("path rewrite targets include config.toml", () => {
+			expect(codex.getPathRewriteTargets()).toContain("config.toml");
+		});
+
+		it("does not define a skills subdir", () => {
+			expect(codex.getSkillsSubdir()).toBeNull();
+		});
+	});
+
 	describe("AntigravityEnvironment", () => {
 		const antigravity = new AntigravityEnvironment();
 
@@ -183,15 +239,16 @@ describe("environment", () => {
 	});
 
 	describe("ALL_ENVIRONMENTS", () => {
-		it("contains claude, opencode, and antigravity", () => {
+		it("contains claude, codex, opencode, and antigravity", () => {
 			const ids = ALL_ENVIRONMENTS.map((e) => e.id);
 			expect(ids).toContain("claude");
+			expect(ids).toContain("codex");
 			expect(ids).toContain("opencode");
 			expect(ids).toContain("antigravity");
 		});
 
-		it("has exactly 3 environments", () => {
-			expect(ALL_ENVIRONMENTS).toHaveLength(3);
+		it("has exactly 4 environments", () => {
+			expect(ALL_ENVIRONMENTS).toHaveLength(4);
 		});
 	});
 
@@ -206,6 +263,12 @@ describe("environment", () => {
 			const env = getEnvironmentById("opencode");
 			expect(env).toBeDefined();
 			expect(env?.id).toBe("opencode");
+		});
+
+		it("returns codex environment for 'codex'", () => {
+			const env = getEnvironmentById("codex");
+			expect(env).toBeDefined();
+			expect(env?.id).toBe("codex");
 		});
 
 		it("returns antigravity environment for 'antigravity'", () => {

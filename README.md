@@ -2,7 +2,7 @@
 
 Git-backed sync for AI tool configuration across macOS, Linux, and Windows/WSL.
 
-Keeps your skills, commands, hooks, settings, and CLAUDE.md identical on every machine — no manual copying. Supports both **Claude Code** (`~/.claude`) and **OpenCode** (`~/.config/opencode/`).
+Keeps your skills, commands, hooks, settings, and tool config identical on every machine. Supports **Claude Code** (`~/.claude`), **Codex** (`~/.codex` or `$CODEX_HOME`), and **OpenCode** (`~/.config/opencode/`).
 
 ## Why
 
@@ -18,7 +18,7 @@ curl -fsSL https://raw.githubusercontent.com/berlinguyinca/ai-sync/main/install.
 
 The installer will:
 1. Clone, build, and link the `ai-sync` binary
-2. Ask which environments to sync (Claude Code, OpenCode, or both)
+2. Ask which environments to sync (Claude Code, Codex, OpenCode, or any combination)
 3. Ask for a GitHub repo name (default: `ai-config`) and visibility
 4. Create the repo via `gh`, run `ai-sync init`, and push your config
 
@@ -69,6 +69,24 @@ ai-sync pull     # backs up current state first
 ai-sync status
 ```
 
+### Adding Codex support
+
+By default, ai-sync only syncs Claude Code. To also sync Codex (`~/.codex` or `$CODEX_HOME`):
+
+```bash
+# 1. Enable the Codex environment
+ai-sync env enable codex
+
+# 2. Push to include portable Codex config in the sync repo
+ai-sync push
+
+# 3. On other machines, enable Codex there too
+ai-sync env enable codex
+ai-sync pull
+```
+
+Codex sync is intentionally narrow: it includes portable user config such as `config.toml` and saved automations, while excluding machine-local auth, session history, sqlite state, caches, and logs.
+
 ### Adding OpenCode support
 
 By default, ai-sync only syncs Claude Code. To also sync OpenCode (`~/.config/opencode/`):
@@ -85,7 +103,7 @@ ai-sync env enable opencode
 ai-sync pull
 ```
 
-Claude Code and OpenCode configs are kept strictly isolated — they live in separate subdirectories (`claude/` and `opencode/`) and are never mixed.
+Claude Code, Codex, and OpenCode configs are kept strictly isolated in per-environment subdirectories and are never mixed.
 
 ## Migration
 
@@ -105,7 +123,7 @@ curl -fsSL https://raw.githubusercontent.com/berlinguyinca/ai-sync/main/install.
 
 ### Migrating from v1 (flat) to v2 (multi-environment)
 
-If you set up ai-sync before multi-environment support was added, your sync repo uses the v1 flat format where all files sit at the root. The v2 format organizes files into per-environment subdirectories (`claude/`, `opencode/`).
+If you set up ai-sync before multi-environment support was added, your sync repo uses the v1 flat format where all files sit at the root. The v2 format organizes files into per-environment subdirectories (`claude/`, `codex/`, `opencode/`).
 
 **Check your current format:**
 
@@ -166,7 +184,7 @@ Creates a git-backed sync repo at `~/.ai-sync` from your existing config directo
 
 - Scans enabled environments through their allowlist manifests
 - Copies only config files (skips ephemeral data)
-- Rewrites absolute paths in `settings.json` / `opencode.json` to portable `{{HOME}}` tokens
+- Rewrites absolute paths in `settings.json`, `opencode.json`, and `config.toml` to portable `{{HOME}}` tokens
 - Creates `.gitattributes` enforcing LF line endings
 - Makes an initial commit
 
@@ -236,7 +254,9 @@ Manage which tool environments are synced.
 
 ```bash
 ai-sync env list              # show all environments and their status
+ai-sync env enable codex      # enable Codex syncing
 ai-sync env enable opencode   # enable OpenCode syncing
+ai-sync env disable codex     # disable Codex syncing
 ai-sync env disable opencode  # disable OpenCode syncing
 ```
 
@@ -277,9 +297,10 @@ ai-sync supports multiple AI tool environments:
 | Environment | Config Dir | Skills Dir | Path Rewrite |
 |-------------|-----------|------------|-------------|
 | Claude Code | `~/.claude` | `commands/` | `settings.json` |
+| Codex | `~/.codex` or `$CODEX_HOME` | n/a | `config.toml` |
 | OpenCode | `~/.config/opencode/` | `command/` | `opencode.json` |
 
-By default, only Claude Code is enabled. Use `ai-sync env enable opencode` to add OpenCode support.
+By default, only Claude Code is enabled. Use `ai-sync env enable codex` or `ai-sync env enable opencode` to add more environments.
 
 ### Repo structure
 
@@ -301,6 +322,9 @@ By default, only Claude Code is enabled. Use `ai-sync env enable opencode` to ad
 │   ├── settings.json
 │   ├── commands/
 │   └── ...
+├── codex/
+│   ├── config.toml
+│   └── automations/
 └── opencode/
     ├── opencode.json
     ├── settings.json
@@ -341,6 +365,17 @@ Use `ai-sync migrate` to move from v1 to v2 format.
 | `package.json` | Dependencies |
 | `gsd-file-manifest.json` | Framework state |
 
+### Codex — Synced
+
+| Path | What it is |
+|------|-----------|
+| `config.toml` | Main Codex configuration (paths auto-rewritten) |
+| `automations/` | Saved recurring tasks and automation definitions |
+
+### Codex — Excluded (machine-local)
+
+`auth.json`, `.codex-global-state.json`, `sessions/`, `session_index.jsonl`, `logs*.sqlite`, `state*.sqlite`, `sqlite/`, `tmp/`, `shell_snapshots/`, `models_cache.json`, `vendor_imports/`
+
 ### Claude Code — Excluded (machine-local — ~1.6GB)
 
 `projects/`, `history.jsonl`, `debug/`, `telemetry/`, `session-env/`, `shell-snapshots/`, `statsig/`, `file-history/`, `todos/`, `plans/`, `paste-cache/`, `ide/`, `cache/`, `backups/`, `downloads/`, `tasks/`, `plugins/install-counts-cache.json`
@@ -349,7 +384,7 @@ These are session data, caches, and logs that regenerate automatically and would
 
 ## Path portability
 
-`settings.json` and `opencode.json` contain absolute paths like `/Users/you/.claude/hooks/my-hook.js` that break on other machines. ai-sync handles this transparently:
+`settings.json`, `opencode.json`, and `config.toml` can contain absolute paths that break on other machines. ai-sync handles this transparently:
 
 - **On push/init:** Rewrites `/Users/you` to `{{HOME}}` in the sync repo
 - **On pull/bootstrap:** Expands `{{HOME}}` back to the local machine's home directory
@@ -374,9 +409,12 @@ You never see the tokens — they exist only in the git repo.
 ├── agents/            ──sync──►     │   ├── settings.json ({{HOME}} tokens)
 ├── hooks/             ──sync──►     │   ├── commands/
 ├── projects/          ✗ excluded    │   └── ...
-├── history.jsonl      ✗ excluded    ├── opencode/
-├── debug/             ✗ excluded    │   ├── opencode.json ({{HOME}} tokens)
-├── telemetry/         ✗ excluded    │   ├── command/
+├── history.jsonl      ✗ excluded    ├── codex/
+├── debug/             ✗ excluded    │   ├── config.toml ({{HOME}} tokens)
+├── telemetry/         ✗ excluded    │   └── automations/
+├── sessions/          ✗ excluded    ├── opencode/
+│                                   │   ├── opencode.json ({{HOME}} tokens)
+│                                   │   ├── command/
 └── ... (16 more)      ✗ excluded    │   └── ...
                                      ├── .gitattributes
                                      └── .git/ → remote

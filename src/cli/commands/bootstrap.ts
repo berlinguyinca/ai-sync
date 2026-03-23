@@ -169,9 +169,13 @@ export async function handleBootstrap(options: BootstrapOptions): Promise<Bootst
 			}
 		}
 
-		// Install skills for all environments
+		// Best effort: bootstrap should still succeed even if skill installation fails
 		log("Installing skills...");
-		await installSkills(claudeDir, environments);
+		try {
+			await installSkills(claudeDir, environments);
+		} catch {
+			// Ignore skill install failures here; users can run install-skills later.
+		}
 	} else {
 		// v1 flat mode
 		log("Using v1 flat mode");
@@ -202,7 +206,11 @@ export async function handleBootstrap(options: BootstrapOptions): Promise<Bootst
 		}
 		totalApplied = repoFiles.length;
 
-		await installSkills(claudeDir);
+		try {
+			await installSkills(claudeDir);
+		} catch {
+			// Ignore skill install failures here; users can run install-skills later.
+		}
 	}
 
 	return {

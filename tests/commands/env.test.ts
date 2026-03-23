@@ -37,6 +37,7 @@ describe("env command logic", () => {
 			expect(ALL_ENVIRONMENTS.length).toBeGreaterThanOrEqual(2);
 			const ids = ALL_ENVIRONMENTS.map((e) => e.id);
 			expect(ids).toContain("claude");
+			expect(ids).toContain("codex");
 			expect(ids).toContain("opencode");
 		});
 
@@ -97,6 +98,7 @@ describe("env command logic", () => {
 	describe("getEnvironmentById", () => {
 		it("returns environment for known ids", () => {
 			expect(getEnvironmentById("claude")).toBeDefined();
+			expect(getEnvironmentById("codex")).toBeDefined();
 			expect(getEnvironmentById("opencode")).toBeDefined();
 		});
 
