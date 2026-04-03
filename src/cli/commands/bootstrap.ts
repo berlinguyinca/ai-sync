@@ -31,7 +31,8 @@ function checkSshConnectivity(repoUrl: string): string | null {
 	}
 
 	try {
-		execSync(`ssh -T -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new ${host}`, {
+		const sshHost = host === "github.com" ? "git@github.com" : host;
+		execSync(`ssh -T -o ConnectTimeout=5 -o StrictHostKeyChecking=yes ${sshHost}`, {
 			stdio: "pipe",
 			timeout: 10_000,
 		});
@@ -44,12 +45,13 @@ function checkSshConnectivity(repoUrl: string): string | null {
 				return null;
 			}
 		}
+		const sshHost = host === "github.com" ? "git@github.com" : host;
 		return (
 			`SSH connection to ${host} failed. Check that:\n` +
 			"  1. Your SSH key is added to the agent: ssh-add -l\n" +
 			"  2. Your key is registered on GitHub: gh ssh-key list\n" +
 			"  3. You can reach the host: ssh -T " +
-			host
+			sshHost
 		);
 	}
 }

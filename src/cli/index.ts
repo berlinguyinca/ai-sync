@@ -54,8 +54,8 @@ program
 			"  ai-sync link                  Symlink config to sync repo (single source of truth)\n" +
 			"  ai-sync unlink                Revert symlinks back to regular files\n" +
 			"  ai-sync migrate               Migrate v1 repo to v2 multi-env format\n\n" +
-			"Auto-update: ai-sync checks for updates once every 24 hours.\n" +
-			"Disable with --no-update-check.",
+			"Update check: ai-sync notifies you of available updates once every 24 hours.\n" +
+			"Run 'ai-sync update' to apply. Disable notifications with --no-update-check.",
 	)
 	.version(getVersion())
 	.option("--no-update-check", "Skip automatic update check on startup");
