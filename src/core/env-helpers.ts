@@ -1,15 +1,16 @@
 import * as path from "node:path";
-import type { Environment } from "./environment.js";
+import { type Environment, isFragmentCapable } from "./environment.js";
 import { isPathAllowed } from "./manifest.js";
 
 /**
  * Creates an allowlist function for an environment's sync targets.
  */
 export function makeAllowlistFn(env: Environment): (relativePath: string) => boolean {
+	const fragmentDirs = isFragmentCapable(env) ? env.getFragmentDirs() : [];
 	return (relativePath: string) =>
 		isPathAllowed(
 			relativePath,
-			env.getSyncTargets(),
+			[...env.getSyncTargets(), ...fragmentDirs],
 			env.getPluginSyncPatterns(),
 			env.getIgnorePatterns(),
 		);

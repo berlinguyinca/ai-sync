@@ -3,7 +3,12 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { simpleGit } from "simple-git";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { detectRepoVersion, migrateToV2 } from "../../src/core/migration.js";
+import {
+	checkVersionCompatibility,
+	detectRepoVersion,
+	migrateToV2,
+	migrateToV3,
+} from "../../src/core/migration.js";
 import {
 	addFiles,
 	addRemote,
@@ -51,10 +56,16 @@ describe("migration", () => {
 		await fs.mkdir(path.join(syncRepoDir, "agents"), { recursive: true });
 		await fs.writeFile(path.join(syncRepoDir, "agents", "default.md"), "agent");
 
-		await addFiles(syncRepoDir, ["."]);
+		await addFiles(syncRepoDir, ["CLAUDE.md", "settings.json", "agents/default.md"]);
 		await commitFiles(syncRepoDir, "feat: initial sync");
 		await simpleGit(syncRepoDir).push("origin", "main");
 
+		return syncRepoDir;
+	}
+
+	async function createV2Repo(): Promise<string> {
+		const syncRepoDir = await createV1Repo();
+		await migrateToV2(syncRepoDir);
 		return syncRepoDir;
 	}
 
@@ -70,6 +81,13 @@ describe("migration", () => {
 			await fs.writeFile(path.join(repoDir, ".sync-version"), "2\n");
 			const version = await detectRepoVersion(repoDir);
 			expect(version).toBe(2);
+		});
+
+		it("returns 3 for repos with .sync-version containing '3'", async () => {
+			const repoDir = await createV1Repo();
+			await fs.writeFile(path.join(repoDir, ".sync-version"), "3\n");
+			const version = await detectRepoVersion(repoDir);
+			expect(version).toBe(3);
 		});
 
 		it("returns 1 for repos with .sync-version containing other content", async () => {
@@ -148,6 +166,87 @@ describe("migration", () => {
 
 			const version = await detectRepoVersion(repoDir);
 			expect(version).toBe(2);
+		});
+	});
+
+	describe("migrateToV3", () => {
+		it("creates shared/ directory", async () => {
+			const repoDir = await createV2Repo();
+			await migrateToV3(repoDir);
+
+			await expect(
+				fs.access(path.join(repoDir, "shared"), fs.constants.F_OK),
+			).resolves.toBeUndefined();
+		});
+
+		it("creates tools/ directory", async () => {
+			const repoDir = await createV2Repo();
+			await migrateToV3(repoDir);
+
+			await expect(
+				fs.access(path.join(repoDir, "tools"), fs.constants.F_OK),
+			).resolves.toBeUndefined();
+		});
+
+		it("writes '3\\n' to .sync-version", async () => {
+			const repoDir = await createV2Repo();
+			await migrateToV3(repoDir);
+
+			const content = await fs.readFile(path.join(repoDir, ".sync-version"), "utf-8");
+			expect(content).toBe("3\n");
+		});
+
+		it("creates a commit with migration message", async () => {
+			const repoDir = await createV2Repo();
+			await migrateToV3(repoDir);
+
+			const git = simpleGit(repoDir);
+			const log = await git.log();
+			expect(log.latest?.message).toBe("chore: migrate sync repo to v3 format");
+		});
+
+		it("throws when repo is at v1", async () => {
+			const repoDir = await createV1Repo();
+			await expect(migrateToV3(repoDir)).rejects.toThrow(/migrate to v2 first/i);
+		});
+
+		it("returns already-at-v3 result for v3 repos", async () => {
+			const repoDir = await createV2Repo();
+			await migrateToV3(repoDir);
+
+			const result = await migrateToV3(repoDir);
+			expect(result.success).toBe(true);
+			expect(result.message).toContain("Already at v3");
+		});
+
+		it("detectRepoVersion returns 3 after migration", async () => {
+			const repoDir = await createV2Repo();
+			await migrateToV3(repoDir);
+
+			const version = await detectRepoVersion(repoDir);
+			expect(version).toBe(3);
+		});
+	});
+
+	describe("checkVersionCompatibility", () => {
+		it("does not throw for version 1", () => {
+			expect(() => checkVersionCompatibility(1)).not.toThrow();
+		});
+
+		it("does not throw for version 2", () => {
+			expect(() => checkVersionCompatibility(2)).not.toThrow();
+		});
+
+		it("does not throw for version 3", () => {
+			expect(() => checkVersionCompatibility(3)).not.toThrow();
+		});
+
+		it("throws for version greater than 3", () => {
+			expect(() => checkVersionCompatibility(4)).toThrow(/Unknown repo version 4/);
+		});
+
+		it("throws with update message for unknown version", () => {
+			expect(() => checkVersionCompatibility(99)).toThrow(/Please update ai-sync/);
 		});
 	});
 });

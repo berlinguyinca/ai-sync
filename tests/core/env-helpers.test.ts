@@ -3,6 +3,7 @@ import { makeAllowlistFn, needsPathRewrite } from "../../src/core/env-helpers.js
 import {
 	AntigravityEnvironment,
 	ClaudeEnvironment,
+	CodexEnvironment,
 	OpenCodeEnvironment,
 } from "../../src/core/environment.js";
 
@@ -46,6 +47,26 @@ describe("makeAllowlistFn", () => {
 			expect(isAllowed(".env")).toBe(false);
 			expect(isAllowed("credentials.json")).toBe(false);
 			expect(isAllowed("plugins/unknown-plugin.json")).toBe(false);
+		});
+
+		it("allows files under fragment dirs (FragmentCapable)", () => {
+			expect(isAllowed("shared/standards/tdd.md")).toBe(true);
+			expect(isAllowed("claude/orchestration/agents.md")).toBe(true);
+		});
+	});
+
+	describe("CodexEnvironment", () => {
+		const codexEnv = new CodexEnvironment();
+		const isAllowed = makeAllowlistFn(codexEnv);
+
+		it("allows codex-specific sync targets", () => {
+			expect(isAllowed("config.toml")).toBe(true);
+			expect(isAllowed("automations/my-automation.toml")).toBe(true);
+		});
+
+		it("does not allow fragment dir paths (not FragmentCapable)", () => {
+			expect(isAllowed("shared/standards/tdd.md")).toBe(false);
+			expect(isAllowed("claude/orchestration/agents.md")).toBe(false);
 		});
 	});
 
