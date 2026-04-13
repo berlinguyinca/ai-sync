@@ -7,7 +7,14 @@ import { makeAllowlistFn, needsPathRewrite } from "../../core/env-helpers.js";
 import { rewritePathsForRepo } from "../../core/path-rewriter.js";
 import { scanDirectory } from "../../core/scanner.js";
 import { installSkills } from "../../core/skills.js";
-import { addFiles, commitFiles, initRepo, isGitRepo, writeGitattributes } from "../../git/repo.js";
+import {
+	addFiles,
+	commitFiles,
+	getStatus,
+	initRepo,
+	isGitRepo,
+	writeGitattributes,
+} from "../../git/repo.js";
 import { getClaudeDir, getSyncRepoDir } from "../../platform/paths.js";
 
 /**
@@ -109,7 +116,11 @@ export async function handleInit(options: InitOptions): Promise<InitResult> {
 
 		// Commit synced files
 		if (totalCopied > 0) {
-			await addFiles(syncRepoDir, ["."]);
+			const initStatus = await getStatus(syncRepoDir);
+			const filesToStage = initStatus.files.map((f) => f.path);
+			if (filesToStage.length > 0) {
+				await addFiles(syncRepoDir, filesToStage);
+			}
 			await commitFiles(syncRepoDir, "feat: initial sync of config");
 		}
 

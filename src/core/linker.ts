@@ -206,6 +206,56 @@ export async function unlinkEnvironment(
 }
 
 /**
+ * Symlinks the shared fragment directory from the sync repo into a config dir.
+ * This allows @-references in CLAUDE.md to resolve relative to the config dir.
+ */
+export async function linkSharedDirectory(
+	syncRepoDir: string,
+	configDir: string,
+	backupDir: string,
+): Promise<{ linked: boolean; backedUp: boolean }> {
+	const repoSharedDir = path.join(syncRepoDir, "shared");
+
+	// 1. Check if syncRepoDir/shared/ exists
+	try {
+		await fs.access(repoSharedDir);
+	} catch {
+		return { linked: false, backedUp: false };
+	}
+
+	const configSharedPath = path.join(configDir, "shared");
+	let backedUp = false;
+
+	// 2. Check if configDir/shared already exists
+	let existingStat: import("node:fs").Stats | null = null;
+	try {
+		existingStat = await fs.lstat(configSharedPath);
+	} catch {
+		// Does not exist — nothing to do before linking
+	}
+
+	if (existingStat !== null) {
+		if (existingStat.isSymbolicLink()) {
+			// Remove the old symlink
+			await fs.rm(configSharedPath);
+		} else {
+			// Real directory: back it up, then remove
+			const backupPath = path.join(backupDir, "shared");
+			await fs.mkdir(path.dirname(backupPath), { recursive: true });
+			await copyRecursive(configSharedPath, backupPath);
+			backedUp = true;
+			await fs.rm(configSharedPath, { recursive: true });
+		}
+	}
+
+	// 3. Create symlink: configDir/shared -> syncRepoDir/shared
+	await fs.mkdir(configDir, { recursive: true });
+	await fs.symlink(repoSharedDir, configSharedPath);
+
+	return { linked: true, backedUp };
+}
+
+/**
  * Recursively copies a file or directory.
  */
 async function copyRecursive(src: string, dest: string): Promise<void> {

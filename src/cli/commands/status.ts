@@ -1,8 +1,12 @@
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
 import type { Command } from "commander";
 import pc from "picocolors";
 import { getEnabledEnvironmentInstances } from "../../core/env-config.js";
+import { verifyTool } from "../../core/provisioner.js";
 import type { SyncStatusResult } from "../../core/sync-engine.js";
 import { syncStatus } from "../../core/sync-engine.js";
+import { ToolManifestSchema } from "../../core/tool-manifest.js";
 import { getClaudeDir, getSyncRepoDir } from "../../platform/paths.js";
 import { printFileChanges } from "../format.js";
 
@@ -87,6 +91,24 @@ export function registerStatusCommand(program: Command): void {
 					console.log(pc.dim(`Synced: ${result.syncedCount} files`));
 				}
 				console.log(pc.dim(`Excluded: ${result.excludedCount} files (not in sync manifest)`));
+
+				// Tool status from manifest
+				const syncRepoDir = opts.repoPath ?? getSyncRepoDir();
+				const manifestPath = path.join(syncRepoDir, "tools", "manifest.json");
+				try {
+					const manifestContent = await fs.readFile(manifestPath, "utf-8");
+					const manifest = ToolManifestSchema.parse(JSON.parse(manifestContent));
+					if (manifest.tools.length > 0) {
+						console.log(pc.dim(`\nTools (${manifest.tools.length}):`));
+						for (const tool of manifest.tools) {
+							const installed = await verifyTool(tool);
+							const status = installed ? pc.green("installed") : pc.yellow("missing");
+							console.log(`  ${tool.name} (${tool.type}): ${status}`);
+						}
+					}
+				} catch {
+					// No manifest — silently skip
+				}
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
 				console.error(pc.red(`Status failed: ${message}`));

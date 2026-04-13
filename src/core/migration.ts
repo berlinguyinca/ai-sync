@@ -3,14 +3,16 @@ import * as path from "node:path";
 import { addFiles, commitFiles, getStatus, hasRemote, pushToRemote } from "../git/repo.js";
 import { scanDirectory } from "./scanner.js";
 
-const SYNC_VERSION_FILE = ".sync-version";
+export const SYNC_VERSION_FILE = ".sync-version";
 
 /**
- * Detects whether the sync repo uses v1 (flat, claude-only) or v2 (subdirectory, multi-env) format.
+ * Detects whether the sync repo uses v1 (flat, claude-only), v2 (subdirectory, multi-env),
+ * or v3 (shared/ + tools/ directories) format.
  */
-export async function detectRepoVersion(syncRepoDir: string): Promise<1 | 2> {
+export async function detectRepoVersion(syncRepoDir: string): Promise<1 | 2 | 3> {
 	try {
 		const content = await fs.readFile(path.join(syncRepoDir, SYNC_VERSION_FILE), "utf-8");
+		if (content.trim() === "3") return 3;
 		if (content.trim() === "2") return 2;
 	} catch {
 		// No version file → v1
@@ -65,7 +67,11 @@ export async function migrateToV2(syncRepoDir: string): Promise<MigrateResult> {
 	await fs.writeFile(path.join(syncRepoDir, SYNC_VERSION_FILE), "2\n");
 
 	// Stage, commit, push
-	await addFiles(syncRepoDir, ["."]);
+	const postMigrateStatus = await getStatus(syncRepoDir);
+	const filesToStage = postMigrateStatus.files.map((f) => f.path);
+	if (filesToStage.length > 0) {
+		await addFiles(syncRepoDir, filesToStage);
+	}
 	await commitFiles(syncRepoDir, "chore: migrate to v2 multi-environment repo structure");
 
 	if (await hasRemote(syncRepoDir)) {
@@ -76,6 +82,52 @@ export async function migrateToV2(syncRepoDir: string): Promise<MigrateResult> {
 		movedFiles,
 		message: `Migrated ${movedFiles.length} files to v2 subdirectory structure`,
 	};
+}
+
+export interface MigrateV3Result {
+	success: boolean;
+	message: string;
+}
+
+/**
+ * Migrates a v2 sync repo to v3 format.
+ *
+ * Creates shared/ and tools/ directories, writes `.sync-version` with content "3", and commits.
+ */
+export async function migrateToV3(syncRepoDir: string): Promise<MigrateV3Result> {
+	// Check current version — must be v2
+	const version = await detectRepoVersion(syncRepoDir);
+	if (version === 1) {
+		throw new Error("Cannot migrate to v3: repo is at v1. Migrate to v2 first.");
+	}
+	if (version === 3) {
+		return { success: true, message: "Already at v3 format" };
+	}
+
+	// Create shared/ directory if not exists
+	await fs.mkdir(path.join(syncRepoDir, "shared"), { recursive: true });
+
+	// Create tools/ directory if not exists
+	await fs.mkdir(path.join(syncRepoDir, "tools"), { recursive: true });
+
+	// Write .sync-version with "3\n"
+	await fs.writeFile(path.join(syncRepoDir, SYNC_VERSION_FILE), "3\n");
+
+	// Stage and commit with explicit file list
+	await addFiles(syncRepoDir, [SYNC_VERSION_FILE]);
+	await commitFiles(syncRepoDir, "chore: migrate sync repo to v3 format");
+
+	return { success: true, message: "Migrated sync repo to v3 format" };
+}
+
+/**
+ * Checks that the repo version is known and supported by this version of ai-sync.
+ * Throws if the version is greater than 3 (i.e. from a newer tool version).
+ */
+export function checkVersionCompatibility(repoVersion: number): void {
+	if (repoVersion > 3) {
+		throw new Error(`Unknown repo version ${repoVersion}. Please update ai-sync.`);
+	}
 }
 
 /**

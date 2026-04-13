@@ -13,9 +13,12 @@ import {
 import { createBackup } from "./backup.js";
 import { makeAllowlistFn, needsPathRewrite } from "./env-helpers.js";
 import type { Environment } from "./environment.js";
-import { detectRepoVersion } from "./migration.js";
+import { detectRepoVersion, migrateToV3 } from "./migration.js";
 import { expandPathsForLocal, rewritePathsForRepo } from "./path-rewriter.js";
+import type { ProvisionResult } from "./provisioner.js";
+import { discoverTools, preflightCheck, provision, writeManifest } from "./provisioner.js";
 import { scanDirectory } from "./scanner.js";
+import { ToolManifestSchema } from "./tool-manifest.js";
 
 /**
  * Options for sync operations.
@@ -34,6 +37,10 @@ export interface SyncOptions {
 	verbose?: boolean;
 	/** Force overwrite of locally modified files during pull. */
 	force?: boolean;
+	/** Skip tool discovery during push. */
+	skipDiscovery?: boolean;
+	/** Skip tool provisioning during pull. */
+	noProvision?: boolean;
 }
 
 /**
@@ -97,6 +104,8 @@ export interface SyncPullResult {
 	errors?: Record<string, string>;
 	/** True when --dry-run was used. */
 	dryRun?: boolean;
+	/** Result of tool provisioning, if manifest was found during pull. */
+	provisioning?: ProvisionResult;
 }
 
 /**
@@ -143,6 +152,26 @@ function resolveLegacyPaths(options: SyncOptions): {
  */
 function getRepoSubdir(syncRepoDir: string, envId: string, version: 1 | 2): string {
 	return version === 1 ? syncRepoDir : path.join(syncRepoDir, envId);
+}
+
+/**
+ * Collects shared fragment file paths from the sync repo.
+ * shared/ lives ONLY in the sync repo, not in any config dir.
+ */
+async function syncSharedDirectory(syncRepoDir: string): Promise<string[]> {
+	const sharedDir = path.join(syncRepoDir, "shared");
+	const changedFiles: string[] = [];
+	try {
+		await fs.access(sharedDir);
+	} catch {
+		return changedFiles; // shared/ doesn't exist yet
+	}
+	// Use scanDirectory from scanner.ts to get all files under shared/
+	const sharedFiles = await scanDirectory(sharedDir);
+	for (const relativePath of sharedFiles) {
+		changedFiles.push(`shared/${relativePath}`);
+	}
+	return changedFiles;
 }
 
 /**
@@ -344,7 +373,54 @@ export async function syncPush(options: SyncOptions): Promise<SyncPushResult> {
 
 	// Stage, commit, push
 	verboseLog(options, `Staging ${fileChanges.length} file(s)...`);
-	await addFiles(syncRepoDir, ["."]);
+	const sharedFiles = await syncSharedDirectory(syncRepoDir);
+	const filesToStage = [...new Set([...status.files.map((f) => f.path), ...sharedFiles])];
+
+	// Tool discovery (non-fatal)
+	if (!options.skipDiscovery) {
+		try {
+			const enabledEnvs = options.environments ?? [];
+			const claudeEnv = enabledEnvs.find((e) => e.id === "claude");
+			if (claudeEnv) {
+				const settingsPath = path.join(claudeEnv.getConfigDir(), "settings.json");
+				const pluginsPath = path.join(
+					claudeEnv.getConfigDir(),
+					"plugins",
+					"installed_plugins.json",
+				);
+				const tools = await discoverTools({ settingsPath, pluginsPath });
+				if (tools.length > 0) {
+					const manifest = {
+						version: 1 as const,
+						discoveredAt: new Date().toISOString(),
+						sourcePlatform: process.platform as "darwin" | "linux" | "win32",
+						tools,
+						autoInstall: false,
+					};
+					await writeManifest(manifest, syncRepoDir);
+					filesToStage.push("tools/manifest.json");
+				}
+			}
+		} catch (err) {
+			// Discovery errors are non-fatal — log and continue
+			if (options.verbose) {
+				console.warn("Tool discovery warning:", err);
+			}
+		}
+	}
+
+	// Auto-upgrade to v3 when fragments or tools are present
+	const repoVersion = await detectRepoVersion(syncRepoDir);
+	const hasFragments = sharedFiles.length > 0;
+	const hasTools = filesToStage.includes("tools/manifest.json");
+	if (repoVersion === 2 && (hasFragments || hasTools)) {
+		await migrateToV3(syncRepoDir);
+		filesToStage.push(".sync-version");
+	}
+
+	if (filesToStage.length > 0) {
+		await addFiles(syncRepoDir, filesToStage);
+	}
 	verboseLog(options, "Committing...");
 	await commitFiles(syncRepoDir, "sync: update config");
 	verboseLog(options, "Pushing to remote...");
@@ -508,10 +584,8 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 
 					if (localContent === null || baseContent === null) {
 						// New file from remote or first sync — apply it
-						const changeType: FileChange["type"] =
-							localContent === null ? "added" : "modified";
-						const needsWrite =
-							localContent === null || localContent !== remoteContent;
+						const changeType: FileChange["type"] = localContent === null ? "added" : "modified";
+						const needsWrite = localContent === null || localContent !== remoteContent;
 						if (needsWrite) {
 							if (!options.dryRun) {
 								await fs.mkdir(path.dirname(destPath), { recursive: true });
@@ -557,10 +631,7 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 							});
 						} else {
 							// Both changed — conflict, keep local version
-							verboseLog(
-								options,
-								`Conflict (keeping local): ${relativePath}`,
-							);
+							verboseLog(options, `Conflict (keeping local): ${relativePath}`);
 							envConflicts.push({ path: relativePath, type: "modified" });
 							allConflicts.push({
 								path: `${env.id}/${relativePath}`,
@@ -584,14 +655,10 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 								// Remote deleted this file — check for local modifications
 								let localModified = false;
 								try {
-									const localData = await fs.readFile(
-										path.join(configDir, localFile),
-										"utf-8",
-									);
+									const localData = await fs.readFile(path.join(configDir, localFile), "utf-8");
 									const rawBase = prePull.get(localFile);
 									const baseData =
-										rawBase !== undefined &&
-										needsPathRewrite(localFile, env)
+										rawBase !== undefined && needsPathRewrite(localFile, env)
 											? expandPathsForLocal(rawBase, homeDir)
 											: rawBase;
 									localModified = localData !== baseData;
@@ -600,10 +667,7 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 								}
 
 								if (localModified && !options.force) {
-									verboseLog(
-										options,
-										`Conflict (remote deleted, local modified): ${localFile}`,
-									);
+									verboseLog(options, `Conflict (remote deleted, local modified): ${localFile}`);
 									envConflicts.push({
 										path: localFile,
 										type: "deleted",
@@ -704,14 +768,12 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 			const baseContent =
 				rawBase !== undefined && isSettings
 					? expandPathsForLocal(rawBase, homeDir)
-					: rawBase ?? null;
+					: (rawBase ?? null);
 
 			if (localContent === null || baseContent === null) {
 				// New file — apply
-				const changeType: FileChange["type"] =
-					localContent === null ? "added" : "modified";
-				const needsWrite =
-					localContent === null || localContent !== remoteContent;
+				const changeType: FileChange["type"] = localContent === null ? "added" : "modified";
+				const needsWrite = localContent === null || localContent !== remoteContent;
 				if (needsWrite) {
 					await fs.mkdir(path.dirname(destPath), { recursive: true });
 					await writeFilePreservingMode(srcPath, destPath, remoteContent);
@@ -734,10 +796,7 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 					await writeFilePreservingMode(srcPath, destPath, remoteContent);
 					allFileChanges.push({ path: relativePath, type: "modified" });
 				} else {
-					verboseLog(
-						options,
-						`Conflict (keeping local): ${relativePath}`,
-					);
+					verboseLog(options, `Conflict (keeping local): ${relativePath}`);
 					allConflicts.push({ path: relativePath, type: "modified" });
 				}
 			}
@@ -752,26 +811,18 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 
 				let localModified = false;
 				try {
-					const localData = await fs.readFile(
-						path.join(claudeDir, localFile),
-						"utf-8",
-					);
+					const localData = await fs.readFile(path.join(claudeDir, localFile), "utf-8");
 					const rawBase = v1PrePull.get(localFile);
 					const isSettings = path.basename(localFile) === "settings.json";
 					const baseData =
-						rawBase !== undefined && isSettings
-							? expandPathsForLocal(rawBase, homeDir)
-							: rawBase;
+						rawBase !== undefined && isSettings ? expandPathsForLocal(rawBase, homeDir) : rawBase;
 					localModified = localData !== baseData;
 				} catch {
 					// Can't read
 				}
 
 				if (localModified && !options.force) {
-					verboseLog(
-						options,
-						`Conflict (remote deleted, local modified): ${localFile}`,
-					);
+					verboseLog(options, `Conflict (remote deleted, local modified): ${localFile}`);
 					allConflicts.push({ path: localFile, type: "deleted" });
 				} else {
 					await fs.rm(path.join(claudeDir, localFile));
@@ -790,6 +841,37 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 			? ` (${allConflicts.length} conflict(s) — local changes preserved, push first then pull)`
 			: "";
 
+	// Tool provisioning (non-fatal, skipped on dry-run and when noProvision is set)
+	let provisioningResult: ProvisionResult | undefined;
+	if (!options.noProvision && !options.dryRun) {
+		const manifestPath = path.join(syncRepoDir, "tools", "manifest.json");
+		try {
+			const manifestContent = await fs.readFile(manifestPath, "utf-8");
+			const manifest = ToolManifestSchema.parse(JSON.parse(manifestContent));
+			if (manifest.tools.length > 0) {
+				const preflight = await preflightCheck(manifest);
+				if (!preflight.ok) {
+					provisioningResult = {
+						installed: [],
+						skipped: [],
+						failed: [],
+						commands: [],
+						rolledBack: true,
+						rollbackPartial: false,
+					};
+				} else {
+					provisioningResult = await provision({
+						manifest,
+						autoInstall: manifest.autoInstall,
+						backupDir: backupDir || "",
+					});
+				}
+			}
+		} catch {
+			// No manifest or invalid — silently skip
+		}
+	}
+
 	return {
 		backupDir,
 		filesApplied: totalApplied,
@@ -801,6 +883,7 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 		perEnvironment: Object.keys(perEnvironment).length > 0 ? perEnvironment : undefined,
 		errors: hasErrors ? errors : undefined,
 		dryRun: options.dryRun,
+		provisioning: provisioningResult,
 	};
 }
 
@@ -985,6 +1068,10 @@ export async function syncStatus(options: SyncOptions): Promise<SyncStatusResult
 		}
 		totalSynced = localFiles.length;
 	}
+
+	// Include shared directory files in the status report
+	const sharedStatusFiles = await syncSharedDirectory(syncRepoDir);
+	totalSynced += sharedStatusFiles.length;
 
 	return {
 		localModifications: allModifications,

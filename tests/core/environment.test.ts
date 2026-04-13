@@ -7,6 +7,7 @@ import {
 	ClaudeEnvironment,
 	CodexEnvironment,
 	getEnvironmentById,
+	isFragmentCapable,
 	OpenCodeEnvironment,
 } from "../../src/core/environment.js";
 
@@ -249,6 +250,34 @@ describe("environment", () => {
 
 		it("has exactly 4 environments", () => {
 			expect(ALL_ENVIRONMENTS).toHaveLength(4);
+		});
+	});
+
+	describe("FragmentCapable", () => {
+		it("ClaudeEnvironment is fragment capable", () => {
+			expect(isFragmentCapable(new ClaudeEnvironment())).toBe(true);
+		});
+
+		it("CodexEnvironment is not fragment capable", () => {
+			expect(isFragmentCapable(new CodexEnvironment())).toBe(false);
+		});
+
+		it("OpenCodeEnvironment is not fragment capable", () => {
+			expect(isFragmentCapable(new OpenCodeEnvironment())).toBe(false);
+		});
+
+		it("AntigravityEnvironment is not fragment capable", () => {
+			expect(isFragmentCapable(new AntigravityEnvironment())).toBe(false);
+		});
+
+		it("ClaudeEnvironment.getFragmentDirs() returns expected dirs", () => {
+			const claude = new ClaudeEnvironment();
+			expect(claude.getFragmentDirs()).toEqual(["shared/", "claude/orchestration/"]);
+		});
+
+		it("ClaudeEnvironment.getIndexFile() returns 'CLAUDE.md'", () => {
+			const claude = new ClaudeEnvironment();
+			expect(claude.getIndexFile()).toBe("CLAUDE.md");
 		});
 	});
 

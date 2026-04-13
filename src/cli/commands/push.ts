@@ -15,6 +15,7 @@ export interface PushOptions {
 	dryRun?: boolean;
 	env?: string;
 	verbose?: boolean;
+	skipDiscovery?: boolean;
 }
 
 /**
@@ -30,6 +31,7 @@ export async function handlePush(options: PushOptions): Promise<SyncPushResult> 
 		dryRun: options.dryRun,
 		filterEnv: options.env,
 		verbose: options.verbose,
+		skipDiscovery: options.skipDiscovery,
 	});
 }
 
@@ -54,30 +56,40 @@ export function registerPushCommand(program: Command): void {
 		.option("-v, --verbose", "Show detailed file changes", false)
 		.option("-n, --dry-run", "Show what would be pushed without making changes", false)
 		.option("--env <id>", "Only push a specific environment (e.g., claude or opencode)")
-		.action(async (opts) => {
-			try {
-				const result = await handlePush(opts);
-				if (result.errors) {
-					console.error(pc.red("Errors during push:"));
-					printErrors(result.errors);
-				}
-				if (result.dryRun) {
-					if (opts.verbose && result.fileChanges.length > 0) {
-						printFileChanges(result.fileChanges);
+		.option("--skip-discovery", "Skip tool discovery", false)
+		.action(
+			async (opts: {
+				repoPath?: string;
+				claudeDir?: string;
+				verbose: boolean;
+				dryRun: boolean;
+				env?: string;
+				skipDiscovery: boolean;
+			}) => {
+				try {
+					const result = await handlePush(opts);
+					if (result.errors) {
+						console.error(pc.red("Errors during push:"));
+						printErrors(result.errors);
 					}
-					console.log(pc.cyan(result.message));
-				} else if (result.pushed) {
-					if (opts.verbose && result.fileChanges.length > 0) {
-						printFileChanges(result.fileChanges);
+					if (result.dryRun) {
+						if (opts.verbose && result.fileChanges.length > 0) {
+							printFileChanges(result.fileChanges);
+						}
+						console.log(pc.cyan(result.message));
+					} else if (result.pushed) {
+						if (opts.verbose && result.fileChanges.length > 0) {
+							printFileChanges(result.fileChanges);
+						}
+						console.log(pc.green(result.message));
+					} else {
+						console.log(pc.yellow("No changes to push -- already up to date"));
 					}
-					console.log(pc.green(result.message));
-				} else {
-					console.log(pc.yellow("No changes to push -- already up to date"));
+				} catch (error) {
+					const message = error instanceof Error ? error.message : String(error);
+					console.error(pc.red(`Push failed: ${message}`));
+					process.exitCode = 1;
 				}
-			} catch (error) {
-				const message = error instanceof Error ? error.message : String(error);
-				console.error(pc.red(`Push failed: ${message}`));
-				process.exitCode = 1;
-			}
-		});
+			},
+		);
 }
