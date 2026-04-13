@@ -104,8 +104,7 @@ export async function performUpdate(force = false): Promise<UpdateResult> {
 /**
  * Silent startup check — runs on every CLI invocation but only
  * actually checks the remote once per CHECK_INTERVAL_MS.
- * Only notifies the user that an update is available; does NOT
- * auto-execute any code. The user must run `ai-sync update` explicitly.
+ * Auto-updates if a new version is found.
  * Never throws — any error is silently swallowed.
  */
 export async function startupUpdateCheck(): Promise<string | null> {
@@ -133,9 +132,31 @@ export async function startupUpdateCheck(): Promise<string | null> {
 
 		if (localHead === remoteHead) return null;
 
-		// Notify only — do not auto-execute remote code.
-		// The user must run `ai-sync update` to apply the update.
-		return `ai-sync update available (${localHead.slice(0, 7)} → ${remoteHead.slice(0, 7)}). Run: ai-sync update`;
+		const fromRef = localHead.slice(0, 7);
+
+		execSync("git reset --hard origin/main", {
+			cwd: installDir,
+			stdio: "pipe",
+		});
+
+		execSync("npm install --no-fund --no-audit --loglevel=error", {
+			cwd: installDir,
+			stdio: "pipe",
+			timeout: INSTALL_TIMEOUT_MS,
+		});
+
+		execSync("npm run build --silent", {
+			cwd: installDir,
+			stdio: "pipe",
+			timeout: BUILD_TIMEOUT_MS,
+		});
+
+		const toRef = execSync("git rev-parse --short HEAD", {
+			cwd: installDir,
+			encoding: "utf-8",
+		}).trim();
+
+		return `ai-sync updated: ${fromRef} → ${toRef}`;
 	} catch {
 		return null; // silent failure
 	}
