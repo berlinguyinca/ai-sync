@@ -50,7 +50,7 @@ export function registerPullCommand(program: Command): void {
 		.option("-n, --dry-run", "Show what would be pulled without making changes", false)
 		.option("-f, --force", "Overwrite locally modified files instead of preserving them", false)
 		.option("--env <id>", "Only pull a specific environment (e.g., claude or opencode)")
-		.option("--no-provision", "Skip tool provisioning", false)
+		.option("--no-provision", "Skip tool provisioning")
 		.action(
 			async (opts: {
 				repoPath?: string;
@@ -93,6 +93,34 @@ export function registerPullCommand(program: Command): void {
 								"\nRun 'ai-sync push' to publish your local changes, or 'ai-sync pull --force' to overwrite.",
 							),
 						);
+					}
+					if (result.provisioning) {
+						const p = result.provisioning;
+						if (p.commands.length > 0) {
+							console.log(pc.cyan("\nTool provisioning (autoInstall: off):"));
+							for (const cmd of p.commands) {
+								console.log(pc.cyan(`  ${cmd}`));
+							}
+						}
+						if (p.installed.length > 0) {
+							console.log(
+								pc.green(`\nProvisioned ${p.installed.length} tool(s)`),
+							);
+						}
+						if (p.failed.length > 0) {
+							console.log(
+								pc.red(
+									`\n${p.failed.length} tool(s) failed to install`,
+								),
+							);
+						}
+						if (p.skipped.length > 0 && opts.verbose) {
+							console.log(
+								pc.dim(
+									`${p.skipped.length} tool(s) already installed`,
+								),
+							);
+						}
 					}
 					if (!result.dryRun && result.backupDir) {
 						console.log(pc.dim(`Backup saved to: ${result.backupDir}`));

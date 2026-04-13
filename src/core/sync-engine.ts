@@ -867,8 +867,13 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 					});
 				}
 			}
-		} catch {
-			// No manifest or invalid — silently skip
+		} catch (provErr) {
+			// No manifest or invalid — log in verbose mode
+			if (options.verbose) {
+				console.warn(
+					pc.yellow(`  [verbose] Provisioning skipped: ${provErr instanceof Error ? provErr.message : String(provErr)}`),
+				);
+			}
 		}
 	}
 
