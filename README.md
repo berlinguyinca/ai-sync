@@ -231,11 +231,9 @@ ai-sync bootstrap https://github.com/you/ai-config.git
 ai-sync bootstrap <url> --force   # re-clone if sync repo exists
 ```
 
-> **SSH note:** If bootstrapping via an SSH URL (`git@...`) from a host you have not connected to before, SSH will prompt you to verify the host key fingerprint. This is expected — confirm it matches the server's published fingerprint before accepting.
-
 ### `ai-sync update`
 
-Checks for and applies tool updates. ai-sync also checks for available updates once every 24 hours on startup and prints a notification if one is found — **updates are never applied automatically**. Run `ai-sync update` explicitly to apply them.
+Checks for and applies tool updates. ai-sync also checks automatically once every 24 hours on startup (disable with `--no-update-check`).
 
 ```bash
 ai-sync update
@@ -287,7 +285,7 @@ The convention is `<name>.<envId>.md` for environment-specific skills, or `<name
 ### Global options
 
 ```bash
-ai-sync --no-update-check <command>   # suppress the startup update notification
+ai-sync --no-update-check <command>   # skip the auto-update check
 ai-sync --version                      # show version
 ai-sync --help                         # show help
 ```
@@ -393,24 +391,6 @@ These are session data, caches, and logs that regenerate automatically and would
 - **Windows support:** Handles both forward-slash and backslash path variants, including JSON-escaped `\\` sequences
 
 You never see the tokens — they exist only in the git repo.
-
-## Security
-
-### Update model
-
-ai-sync **never applies updates without explicit user action.** The startup check (every 24 hours) only prints a notification — no code is downloaded or executed. Run `ai-sync update` when you choose to apply an update.
-
-### Version pinning
-
-The installer (`install.sh`) clones a specific pinned release tag (`PINNED_VERSION`) rather than the `main` branch. This means only explicitly tagged releases reach users, not every commit merged to `main`. The pinned version is updated as part of each release.
-
-### SSH host key verification
-
-`ai-sync bootstrap` uses standard SSH host key checking (`StrictHostKeyChecking=yes`). If you connect to a host for the first time, SSH will prompt you to verify the fingerprint — do not accept keys you cannot verify.
-
-### Allowlist-based sync
-
-Only files in the explicit allowlist are ever read or written. Credentials, session data, caches, and history are structurally excluded — they are not filtered by name matching but are simply never in scope.
 
 ## Safety
 

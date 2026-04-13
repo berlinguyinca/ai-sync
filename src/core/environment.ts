@@ -26,9 +26,22 @@ export interface Environment {
 }
 
 /**
+ * Optional capability for environments that support fragment-based config files.
+ * Use isFragmentCapable() type guard to check at runtime.
+ */
+export interface FragmentCapable {
+	getFragmentDirs(): string[];
+	getIndexFile(): string;
+}
+
+export function isFragmentCapable(env: Environment): env is Environment & FragmentCapable {
+	return "getFragmentDirs" in env && "getIndexFile" in env;
+}
+
+/**
  * Claude Code environment — config lives at ~/.claude
  */
-export class ClaudeEnvironment implements Environment {
+export class ClaudeEnvironment implements Environment, FragmentCapable {
 	readonly id = "claude";
 	readonly displayName = "Claude Code";
 
@@ -73,6 +86,14 @@ export class ClaudeEnvironment implements Environment {
 
 	getSkillsSubdir(): string | null {
 		return "commands";
+	}
+
+	getFragmentDirs(): string[] {
+		return ["shared/", "claude/orchestration/"];
+	}
+
+	getIndexFile(): string {
+		return "CLAUDE.md";
 	}
 }
 

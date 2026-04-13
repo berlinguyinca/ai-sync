@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
 	DEFAULT_SYNC_TARGETS,
 	isPathAllowed,
+	isRepoLevelPathAllowed,
 	PLUGIN_IGNORE_PATTERNS,
 	PLUGIN_SYNC_PATTERNS,
+	REPO_LEVEL_SYNC_TARGETS,
 } from "../../src/core/manifest.js";
 
 describe("manifest", () => {
@@ -125,6 +127,31 @@ describe("manifest", () => {
 
 		it("rejects unknown directories", () => {
 			expect(isPathAllowed("unknown-new-directory/file.txt")).toBe(false);
+		});
+	});
+
+	describe("REPO_LEVEL_SYNC_TARGETS", () => {
+		it("contains shared/ and tools/", () => {
+			expect(REPO_LEVEL_SYNC_TARGETS).toContain("shared/");
+			expect(REPO_LEVEL_SYNC_TARGETS).toContain("tools/");
+		});
+	});
+
+	describe("isRepoLevelPathAllowed", () => {
+		it("allows files nested under shared/", () => {
+			expect(isRepoLevelPathAllowed("shared/standards/tdd.md")).toBe(true);
+		});
+
+		it("allows files nested under tools/", () => {
+			expect(isRepoLevelPathAllowed("tools/manifest.json")).toBe(true);
+		});
+
+		it("rejects paths not in repo-level targets", () => {
+			expect(isRepoLevelPathAllowed("random/file.txt")).toBe(false);
+		});
+
+		it("rejects paths that are prefix matches but not under a target dir", () => {
+			expect(isRepoLevelPathAllowed("shared-other/file.txt")).toBe(false);
 		});
 	});
 });

@@ -9,8 +9,11 @@ import { getEnabledEnvironmentInstances } from "../../core/env-config.js";
 import { makeAllowlistFn, needsPathRewrite } from "../../core/env-helpers.js";
 import { detectRepoVersion } from "../../core/migration.js";
 import { expandPathsForLocal } from "../../core/path-rewriter.js";
+import type { ProvisionResult } from "../../core/provisioner.js";
+import { preflightCheck, provision } from "../../core/provisioner.js";
 import { scanDirectory } from "../../core/scanner.js";
 import { installSkills } from "../../core/skills.js";
+import { ToolManifestSchema } from "../../core/tool-manifest.js";
 import { isGitRepo } from "../../git/repo.js";
 import { getClaudeDir, getSyncRepoDir } from "../../platform/paths.js";
 
@@ -31,8 +34,7 @@ function checkSshConnectivity(repoUrl: string): string | null {
 	}
 
 	try {
-		const sshHost = host === "github.com" ? "git@github.com" : host;
-		execSync(`ssh -T -o ConnectTimeout=5 -o StrictHostKeyChecking=yes ${sshHost}`, {
+		execSync(`ssh -T -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new ${host}`, {
 			stdio: "pipe",
 			timeout: 10_000,
 		});
@@ -45,13 +47,12 @@ function checkSshConnectivity(repoUrl: string): string | null {
 				return null;
 			}
 		}
-		const sshHost = host === "github.com" ? "git@github.com" : host;
 		return (
 			`SSH connection to ${host} failed. Check that:\n` +
 			"  1. Your SSH key is added to the agent: ssh-add -l\n" +
 			"  2. Your key is registered on GitHub: gh ssh-key list\n" +
 			"  3. You can reach the host: ssh -T " +
-			sshHost
+			host
 		);
 	}
 }
@@ -62,6 +63,7 @@ export interface BootstrapOptions {
 	claudeDir?: string;
 	force?: boolean;
 	verbose?: boolean;
+	noProvision?: boolean;
 }
 
 export interface BootstrapResult {
@@ -70,6 +72,7 @@ export interface BootstrapResult {
 	filesApplied: number;
 	backupDir: string | null;
 	message: string;
+	provisioning?: ProvisionResult;
 }
 
 /**
@@ -215,6 +218,37 @@ export async function handleBootstrap(options: BootstrapOptions): Promise<Bootst
 		}
 	}
 
+	// Tool provisioning (non-fatal)
+	let provisioningResult: ProvisionResult | undefined;
+	if (!options.noProvision) {
+		const manifestPath = path.join(syncRepoDir, "tools", "manifest.json");
+		try {
+			const manifestContent = await fs.readFile(manifestPath, "utf-8");
+			const manifest = ToolManifestSchema.parse(JSON.parse(manifestContent));
+			if (manifest.tools.length > 0) {
+				const preflight = await preflightCheck(manifest);
+				if (!preflight.ok) {
+					provisioningResult = {
+						installed: [],
+						skipped: [],
+						failed: [],
+						commands: [],
+						rolledBack: true,
+						rollbackPartial: false,
+					};
+				} else {
+					provisioningResult = await provision({
+						manifest,
+						autoInstall: manifest.autoInstall,
+						backupDir: backupDir || "",
+					});
+				}
+			}
+		} catch {
+			// No manifest or invalid — silently skip
+		}
+	}
+
 	return {
 		syncRepoDir,
 		claudeDir,
@@ -223,6 +257,7 @@ export async function handleBootstrap(options: BootstrapOptions): Promise<Bootst
 		message: backupDir
 			? `Bootstrapped ${totalApplied} files from ${options.repoUrl}. Backup at: ${backupDir}`
 			: `Bootstrapped ${totalApplied} files from ${options.repoUrl}`,
+		provisioning: provisioningResult,
 	};
 }
 
@@ -237,10 +272,17 @@ export function registerBootstrapCommand(program: Command): void {
 		.option("--repo-path <path>", "Custom sync repo path", getSyncRepoDir())
 		.option("--claude-dir <path>", "Custom ~/.claude path", getClaudeDir())
 		.option("-v, --verbose", "Show detailed progress", false)
+		.option("--no-provision", "Skip tool provisioning", false)
 		.action(
 			async (
 				repoUrl: string,
-				opts: { force: boolean; repoPath: string; claudeDir: string; verbose: boolean },
+				opts: {
+					force: boolean;
+					repoPath: string;
+					claudeDir: string;
+					verbose: boolean;
+					provision: boolean;
+				},
 			) => {
 				try {
 					const result = await handleBootstrap({
@@ -249,6 +291,7 @@ export function registerBootstrapCommand(program: Command): void {
 						repoPath: opts.repoPath,
 						claudeDir: opts.claudeDir,
 						verbose: opts.verbose,
+						noProvision: !opts.provision,
 					});
 					console.log(pc.green(`Bootstrapped ${result.filesApplied} files from remote`));
 					console.log(pc.green(`  Sync repo: ${result.syncRepoDir}`));

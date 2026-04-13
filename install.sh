@@ -4,8 +4,7 @@ set -euo pipefail
 # ai-sync online installer
 # Usage: curl -fsSL https://raw.githubusercontent.com/berlinguyinca/ai-sync/main/install.sh | bash
 
-REPO="johnzastrow/ai-sync"
-PINNED_VERSION="v0.2.3"   # Updated on each release — pinned to avoid pulling unreviewed main
+REPO="berlinguyinca/ai-sync"
 INSTALL_DIR="${AI_SYNC_INSTALL_DIR:-${CLAUDE_SYNC_INSTALL_DIR:-$HOME/.ai-sync-cli}}"
 SYNC_DIR="$HOME/.ai-sync"
 BIN_LINK="/usr/local/bin/ai-sync"
@@ -15,6 +14,27 @@ info()  { printf '\033[1;34m%s\033[0m\n' "$*"; }
 ok()    { printf '\033[1;32m%s\033[0m\n' "$*"; }
 warn()  { printf '\033[1;33m%s\033[0m\n' "$*"; }
 err()   { printf '\033[1;31mError: %s\033[0m\n' "$*" >&2; exit 1; }
+
+# Offer to star the repo on GitHub
+ask_star() {
+  echo ""
+  printf '\033[1;33m\u2B50 Enjoying ai-sync? Star us on GitHub to help others discover it!\033[0m\n'
+  printf '   \033[4mhttps://github.com/%s\033[0m\n' "$REPO"
+  echo ""
+  local answer
+  answer=$(prompt "Open in browser? (y/n)" "y")
+  if [ "$answer" = "y" ] || [ "$answer" = "Y" ]; then
+    if command -v open >/dev/null 2>&1; then
+      open "https://github.com/$REPO"
+    elif command -v xdg-open >/dev/null 2>&1; then
+      xdg-open "https://github.com/$REPO"
+    elif command -v wslview >/dev/null 2>&1; then
+      wslview "https://github.com/$REPO"
+    else
+      echo "  Visit: https://github.com/$REPO"
+    fi
+  fi
+}
 
 # Read user input — works even when script is piped via curl | bash
 # Returns the value via stdout; caller captures with $()
@@ -231,19 +251,16 @@ ok "Node.js $(node -v | tr -d v) found"
 # ── install ────────────────────────────────────────────────────────
 
 if [ -d "$INSTALL_DIR/.git" ]; then
-  info "Updating existing installation in $INSTALL_DIR to $PINNED_VERSION..."
-  git -C "$INSTALL_DIR" fetch --depth 1 origin "refs/tags/$PINNED_VERSION"
-  git -C "$INSTALL_DIR" reset --hard FETCH_HEAD
+  info "Updating existing installation in $INSTALL_DIR..."
+  git -C "$INSTALL_DIR" fetch --depth 1 origin main
+  git -C "$INSTALL_DIR" reset --hard origin/main
 else
-  info "Cloning ai-sync $PINNED_VERSION into $INSTALL_DIR..."
-  git clone --depth 1 --branch "$PINNED_VERSION" "https://github.com/$REPO.git" "$INSTALL_DIR"
+  info "Cloning ai-sync into $INSTALL_DIR..."
+  git clone --depth 1 "https://github.com/$REPO.git" "$INSTALL_DIR"
 fi
 
 info "Installing dependencies..."
 (cd "$INSTALL_DIR" && npm install --no-fund --no-audit --loglevel=error)
-
-info "Updating package.json version to $PINNED_VERSION..."
-sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"${PINNED_VERSION#v}\"/" "$INSTALL_DIR/package.json" 2>/dev/null || true
 
 info "Building..."
 (cd "$INSTALL_DIR" && npm run build --silent)
@@ -307,7 +324,7 @@ if [ -d "$SYNC_DIR/.git" ]; then
   echo "  ai-sync push    # push local changes"
   echo "  ai-sync pull    # pull remote changes"
   echo "  ai-sync status  # check sync state"
-  echo ""
+  ask_star
   exit 0
 fi
 
@@ -411,4 +428,5 @@ ok "All done! Your config is synced to $REMOTE_URL"
 echo ""
 echo "On other machines, run:"
 echo "  curl -fsSL https://raw.githubusercontent.com/$REPO/main/install.sh | bash"
+ask_star
 echo ""

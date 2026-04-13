@@ -7,6 +7,7 @@ import {
 	getLinkableTargets,
 	getUnlinkableTargets,
 	linkEnvironment,
+	linkSharedDirectory,
 	unlinkEnvironment,
 } from "../../src/core/linker.js";
 
@@ -200,6 +201,75 @@ describe("core/linker", () => {
 			expect(result.linked).toContain("CLAUDE.md");
 			const content = fs.readFileSync(path.join(configDir, "CLAUDE.md"), "utf-8");
 			expect(content).toBe("# From repo");
+		});
+	});
+
+	describe("linkSharedDirectory", () => {
+		it("creates symlink when shared/ exists in repo", async () => {
+			// Create shared/ in the repo
+			const repoSharedDir = path.join(syncRepoDir, "shared");
+			fs.mkdirSync(repoSharedDir, { recursive: true });
+			fs.writeFileSync(path.join(repoSharedDir, "standards.md"), "# Standards");
+
+			const result = await linkSharedDirectory(syncRepoDir, configDir, backupDir);
+
+			expect(result.linked).toBe(true);
+			expect(result.backedUp).toBe(false);
+			// configDir/shared should be a symlink pointing to repoSharedDir
+			const stat = fs.lstatSync(path.join(configDir, "shared"));
+			expect(stat.isSymbolicLink()).toBe(true);
+			const target = fs.readlinkSync(path.join(configDir, "shared"));
+			expect(target).toBe(repoSharedDir);
+		});
+
+		it("returns linked:false when shared/ does not exist in repo", async () => {
+			const result = await linkSharedDirectory(syncRepoDir, configDir, backupDir);
+
+			expect(result.linked).toBe(false);
+			expect(result.backedUp).toBe(false);
+		});
+
+		it("backs up existing real directory before linking", async () => {
+			// Create shared/ in the repo
+			const repoSharedDir = path.join(syncRepoDir, "shared");
+			fs.mkdirSync(repoSharedDir, { recursive: true });
+			fs.writeFileSync(path.join(repoSharedDir, "standards.md"), "# Repo standards");
+
+			// Create a real shared/ in the config dir
+			const configSharedDir = path.join(configDir, "shared");
+			fs.mkdirSync(configSharedDir, { recursive: true });
+			fs.writeFileSync(path.join(configSharedDir, "local.md"), "# Local content");
+
+			const result = await linkSharedDirectory(syncRepoDir, configDir, backupDir);
+
+			expect(result.linked).toBe(true);
+			expect(result.backedUp).toBe(true);
+			// Backup should contain the original file
+			const backedUpContent = fs.readFileSync(path.join(backupDir, "shared", "local.md"), "utf-8");
+			expect(backedUpContent).toBe("# Local content");
+			// configDir/shared should now be a symlink
+			const stat = fs.lstatSync(path.join(configDir, "shared"));
+			expect(stat.isSymbolicLink()).toBe(true);
+		});
+
+		it("replaces existing symlink without backup", async () => {
+			// Create shared/ in the repo
+			const repoSharedDir = path.join(syncRepoDir, "shared");
+			fs.mkdirSync(repoSharedDir, { recursive: true });
+			fs.writeFileSync(path.join(repoSharedDir, "standards.md"), "# Standards");
+
+			// Create an old symlink pointing elsewhere
+			const otherDir = path.join(tmpDir, "other");
+			fs.mkdirSync(otherDir, { recursive: true });
+			fs.symlinkSync(otherDir, path.join(configDir, "shared"));
+
+			const result = await linkSharedDirectory(syncRepoDir, configDir, backupDir);
+
+			expect(result.linked).toBe(true);
+			expect(result.backedUp).toBe(false);
+			// Should now point to the repo shared dir
+			const target = fs.readlinkSync(path.join(configDir, "shared"));
+			expect(target).toBe(repoSharedDir);
 		});
 	});
 
