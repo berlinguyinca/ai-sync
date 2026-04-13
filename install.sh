@@ -15,6 +15,27 @@ ok()    { printf '\033[1;32m%s\033[0m\n' "$*"; }
 warn()  { printf '\033[1;33m%s\033[0m\n' "$*"; }
 err()   { printf '\033[1;31mError: %s\033[0m\n' "$*" >&2; exit 1; }
 
+# Offer to star the repo on GitHub
+ask_star() {
+  echo ""
+  printf '\033[1;33m\u2B50 Enjoying ai-sync? Star us on GitHub to help others discover it!\033[0m\n'
+  printf '   \033[4mhttps://github.com/%s\033[0m\n' "$REPO"
+  echo ""
+  local answer
+  answer=$(prompt "Open in browser? (y/n)" "y")
+  if [ "$answer" = "y" ] || [ "$answer" = "Y" ]; then
+    if command -v open >/dev/null 2>&1; then
+      open "https://github.com/$REPO"
+    elif command -v xdg-open >/dev/null 2>&1; then
+      xdg-open "https://github.com/$REPO"
+    elif command -v wslview >/dev/null 2>&1; then
+      wslview "https://github.com/$REPO"
+    else
+      echo "  Visit: https://github.com/$REPO"
+    fi
+  fi
+}
+
 # Read user input — works even when script is piped via curl | bash
 # Returns the value via stdout; caller captures with $()
 prompt() {
@@ -303,7 +324,7 @@ if [ -d "$SYNC_DIR/.git" ]; then
   echo "  ai-sync push    # push local changes"
   echo "  ai-sync pull    # pull remote changes"
   echo "  ai-sync status  # check sync state"
-  echo ""
+  ask_star
   exit 0
 fi
 
@@ -407,4 +428,5 @@ ok "All done! Your config is synced to $REMOTE_URL"
 echo ""
 echo "On other machines, run:"
 echo "  curl -fsSL https://raw.githubusercontent.com/$REPO/main/install.sh | bash"
+ask_star
 echo ""
