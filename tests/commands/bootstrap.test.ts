@@ -4,7 +4,11 @@ import * as path from "node:path";
 import { Command } from "commander";
 import { simpleGit } from "simple-git";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { handleBootstrap, registerBootstrapCommand } from "../../src/cli/commands/bootstrap.js";
+import {
+	handleBootstrap,
+	parseSshHost,
+	registerBootstrapCommand,
+} from "../../src/cli/commands/bootstrap.js";
 import { isGitRepo } from "../../src/git/repo.js";
 
 /**
@@ -368,5 +372,33 @@ describe("bootstrap CLI action (integration)", () => {
 		const errOutput = errorSpy.mock.calls.map((c) => c[0]).join("\n");
 		expect(errOutput).toContain("Bootstrap failed");
 		expect(process.exitCode).toBe(1);
+	});
+});
+
+describe("parseSshHost", () => {
+	it("returns null for https URLs (regression: bootstrap previously misparsed 'https' as host)", () => {
+		expect(parseSshHost("https://github.com/foo/bar.git")).toBeNull();
+	});
+
+	it("returns null for http URLs", () => {
+		expect(parseSshHost("http://example.com/foo/bar.git")).toBeNull();
+	});
+
+	it("extracts host from scp-style git@github.com:owner/repo.git", () => {
+		expect(parseSshHost("git@github.com:owner/repo.git")).toBe("github.com");
+	});
+
+	it("extracts host from ssh:// URL with user", () => {
+		expect(parseSshHost("ssh://git@github.com/owner/repo.git")).toBe("github.com");
+	});
+
+	it("extracts host from a non-github SSH URL", () => {
+		expect(parseSshHost("user@gitlab.example.com:proj/repo.git")).toBe("gitlab.example.com");
+	});
+
+	it("returns null for local paths (no user@host)", () => {
+		expect(parseSshHost("/some/local/path")).toBeNull();
+		expect(parseSshHost("./relative/path")).toBeNull();
+		expect(parseSshHost("file:///tmp/repo")).toBeNull();
 	});
 });

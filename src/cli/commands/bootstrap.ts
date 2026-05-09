@@ -18,15 +18,23 @@ import { isGitRepo } from "../../git/repo.js";
 import { getClaudeDir, getSyncRepoDir } from "../../platform/paths.js";
 
 /**
+ * Extracts the host from an SSH-style git URL (ssh://, scp-style git@host:path,
+ * or any user@host:path). Returns null for HTTP(S) URLs and anything that
+ * isn't recognizably SSH. Exported for unit testing.
+ */
+export function parseSshHost(repoUrl: string): string | null {
+	if (repoUrl.startsWith("http://") || repoUrl.startsWith("https://")) return null;
+	const sshMatch = repoUrl.match(/^(?:ssh:\/\/)?(?:[^@\s]+@)([^:/\s]+)/);
+	return sshMatch?.[1] ?? null;
+}
+
+/**
  * Checks SSH connectivity to the host in the given URL.
- * Returns null on success, or an error message string on failure.
+ * Returns null on success (or when the URL isn't SSH), or an error message string on failure.
  */
 function checkSshConnectivity(repoUrl: string): string | null {
-	// Only check for SSH-style URLs
-	const sshMatch = repoUrl.match(/^(?:ssh:\/\/)?(?:[^@]+@)?([^:/]+)/);
-	if (!sshMatch && !repoUrl.includes("git@")) return null;
-
-	const host = sshMatch?.[1] ?? "github.com";
+	const host = parseSshHost(repoUrl);
+	if (host === null) return null;
 
 	// Validate hostname to prevent command injection — only allow DNS-safe characters
 	if (!/^[a-zA-Z0-9._-]+$/.test(host)) {
