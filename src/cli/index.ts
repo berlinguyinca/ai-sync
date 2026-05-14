@@ -78,13 +78,15 @@ registerResolveCommand(program);
 export { program };
 
 // Only parse when run directly (not imported as a module)
-// Check if this file is the entry point
+// Check if this file is the entry point.
+// Normalize backslashes on Windows so the endsWith checks match regardless of platform.
+const entryPath = (process.argv[1] ?? "").replace(/\\/g, "/");
 const isDirectRun =
 	typeof process !== "undefined" &&
-	process.argv[1] &&
-	(process.argv[1].endsWith("/cli/index.ts") ||
-		process.argv[1].endsWith("/cli.js") ||
-		process.argv[1].endsWith("/ai-sync"));
+	entryPath !== "" &&
+	(entryPath.endsWith("/cli/index.ts") ||
+		entryPath.endsWith("/cli.js") ||
+		entryPath.endsWith("/ai-sync"));
 
 if (isDirectRun) {
 	// Run startup update check before parsing commands
