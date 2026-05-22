@@ -1,12 +1,16 @@
 import * as fs from "node:fs/promises";
+import * as os from "node:os";
 import * as path from "node:path";
 import type { Command } from "commander";
 import pc from "picocolors";
+import { classifyDrift, type DriftReport } from "../../core/drift.js";
 import { getEnabledEnvironmentInstances } from "../../core/env-config.js";
+import type { Environment } from "../../core/environment.js";
 import { verifyTool } from "../../core/provisioner.js";
 import type { SyncStatusResult } from "../../core/sync-engine.js";
 import { syncStatus } from "../../core/sync-engine.js";
 import { ToolManifestSchema } from "../../core/tool-manifest.js";
+import { fetchRemote, hasRemote } from "../../git/repo.js";
 import { getClaudeDir, getSyncRepoDir } from "../../platform/paths.js";
 import { printFileChanges } from "../format.js";
 
@@ -18,6 +22,10 @@ export interface StatusOptions {
 	claudeDir?: string;
 	env?: string;
 	verbose?: boolean;
+	/** Override the environment list (testing). */
+	environments?: Environment[];
+	/** Override the home dir used for path-rewrite normalization (testing). */
+	homeDir?: string;
 }
 
 /**
@@ -25,7 +33,7 @@ export interface StatusOptions {
  * Delegates to syncStatus from the sync engine.
  */
 export async function handleStatus(options: StatusOptions): Promise<SyncStatusResult> {
-	const environments = getEnabledEnvironmentInstances();
+	const environments = options.environments ?? getEnabledEnvironmentInstances();
 	return syncStatus({
 		claudeDir: options.claudeDir ?? getClaudeDir(),
 		syncRepoDir: options.repoPath ?? getSyncRepoDir(),
@@ -33,6 +41,108 @@ export async function handleStatus(options: StatusOptions): Promise<SyncStatusRe
 		filterEnv: options.env,
 		verbose: options.verbose,
 	});
+}
+
+/**
+ * Computes the drift report for every enabled environment.
+ *
+ * Fetches the remote (when configured) so the report reflects up-to-date
+ * remote state without modifying the working tree.
+ */
+export async function handleStatusDrift(options: StatusOptions): Promise<DriftReport[]> {
+	const syncRepoDir = options.repoPath ?? getSyncRepoDir();
+	const homeDir = options.homeDir ?? os.homedir();
+	let environments: Environment[];
+	if (options.environments) {
+		environments = options.environments;
+	} else if (options.claudeDir) {
+		// Legacy v1 single-env mode: build a synthetic claude env pointed at
+		// the explicit --claude-dir so the drift report doesn't accidentally
+		// scan the operator's real home directory during tests.
+		environments = [makeSyntheticClaudeEnv(options.claudeDir)];
+	} else {
+		environments = getEnabledEnvironmentInstances();
+	}
+	if (options.env) {
+		environments = environments.filter((e) => e.id === options.env);
+	}
+	try {
+		if (await hasRemote(syncRepoDir)) {
+			await fetchRemote(syncRepoDir);
+		}
+	} catch {
+		// Network or no-remote — drift will use HEAD as remote fallback.
+	}
+	return classifyDrift(environments, syncRepoDir, homeDir);
+}
+
+/**
+ * Builds an Environment that points at an explicit claudeDir. Used when the
+ * CLI is invoked with `--claude-dir` (legacy v1 mode) so drift classification
+ * stays scoped to the directory the operator named.
+ */
+function makeSyntheticClaudeEnv(claudeDir: string): Environment {
+	return {
+		id: "claude",
+		displayName: "Claude Code",
+		getConfigDir: () => claudeDir,
+		getSyncTargets: () => [
+			"settings.json",
+			"CLAUDE.md",
+			"agents/",
+			"commands/",
+			"hooks/",
+			"get-shit-done/",
+			"package.json",
+			"gsd-file-manifest.json",
+			"skills/",
+			"rules/",
+			"keybindings.json",
+		],
+		getPluginSyncPatterns: () => [],
+		getIgnorePatterns: () => [],
+		getPathRewriteTargets: () => ["settings.json"],
+		getSkillsSubdir: () => "commands",
+	};
+}
+
+/**
+ * Renders the drift report to stdout using picocolors. When `verbose` is true
+ * the filenames in each non-empty bucket are listed beneath the counts.
+ */
+export function printDriftReport(reports: DriftReport[], verbose: boolean): void {
+	if (reports.length === 0) {
+		console.log(pc.dim("No environments enabled."));
+		return;
+	}
+	for (const r of reports) {
+		const lo = r.localOnly.length;
+		const ro = r.remoteOnly.length;
+		const bc = r.bothChanged.length;
+		const sp = r.stagedPending.length;
+		console.log(
+			pc.cyan(`Env ${r.envName}:`) +
+				` local-only=${lo} remote-only=${ro} both-changed=${bc} staged-pending=${sp}`,
+		);
+		if (verbose) {
+			if (lo > 0) {
+				console.log(pc.dim("  local-only:"));
+				for (const f of r.localOnly) console.log(pc.dim(`    ${f}`));
+			}
+			if (ro > 0) {
+				console.log(pc.dim("  remote-only:"));
+				for (const f of r.remoteOnly) console.log(pc.dim(`    ${f}`));
+			}
+			if (bc > 0) {
+				console.log(pc.yellow("  both-changed:"));
+				for (const f of r.bothChanged) console.log(pc.yellow(`    ${f}`));
+			}
+			if (sp > 0) {
+				console.log(pc.dim("  staged-pending:"));
+				for (const f of r.stagedPending) console.log(pc.dim(`    ${f}`));
+			}
+		}
+	}
 }
 
 /**
@@ -52,6 +162,23 @@ export function registerStatusCommand(program: Command): void {
 
 				if (!result.hasRemote) {
 					console.log(pc.yellow("No remote configured"));
+				}
+
+				// Drift report (per env) — runs before legacy sections so the
+				// new structured output is the headline.
+				try {
+					const drift = await handleStatusDrift(opts);
+					printDriftReport(drift, !!opts.verbose);
+				} catch (driftErr) {
+					if (opts.verbose) {
+						console.error(
+							pc.yellow(
+								`  [verbose] drift report skipped: ${
+									driftErr instanceof Error ? driftErr.message : String(driftErr)
+								}`,
+							),
+						);
+					}
 				}
 
 				if (opts.verbose) {
