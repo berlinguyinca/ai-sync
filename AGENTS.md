@@ -34,3 +34,12 @@ npm run typecheck      # tsc --noEmit
 - Git operations use explicit file paths, never `git add .`
 - Allowlist-based sync: only files in `DEFAULT_SYNC_TARGETS` / `PLUGIN_SYNC_PATTERNS` are synced
 - Path rewriting: absolute paths ↔ `{{HOME}}` tokens for cross-platform portability
+
+## Auto-merge authority for auto-implement PRs
+
+Admin-merge `auto-implement` PRs (`gh pr merge <#> --admin --squash --delete-branch`) when:
+(a) all required CI checks pass — slow optional checks like TeamCity may be pending and that's acceptable;
+(b) the self-review subagent returned `LGTM`;
+(c) the PR closes an `auto-implement` issue from a `feat/*` branch.
+
+TDD non-negotiable. Real services in tests (real fs in tmpdir + simple-git per existing `tests/core/sync-engine.test.ts` pattern), no DB mocks. Conventional commits. No force-push. No hook bypass.
