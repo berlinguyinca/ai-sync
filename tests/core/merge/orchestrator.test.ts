@@ -115,6 +115,47 @@ describe("tryAiMerge()", () => {
 		expect(staged).toHaveLength(0);
 	});
 
+	it("routes through mergeWithStrategy and falls back when JSON parse fails", async () => {
+		const cfg = { ...defaultMergeConfig(), enabled: true };
+		const warnings: string[] = [];
+		const result = await tryAiMerge(
+			{
+				relativePath: "settings.json",
+				envName: "claude",
+				base: "{}",
+				local: "{}",
+				remote: "{}",
+			},
+			{
+				config: cfg,
+				resolver: stubResolver("{not json"),
+				syncRepoDir,
+				warn: (m) => warnings.push(m),
+			},
+		);
+		expect(result.kind).toBe("fallback");
+		expect(result.kind === "fallback" && result.reason).toBe("json-parse");
+		expect(warnings.some((w) => w.includes("json-parse"))).toBe(true);
+		// strategy fallback should NOT stage anything
+		const staged = await listStaged(syncRepoDir);
+		expect(staged).toHaveLength(0);
+	});
+
+	it("routes a markdown file through ai-freeform and stages verbatim", async () => {
+		const cfg = { ...defaultMergeConfig(), enabled: true };
+		const result = await tryAiMerge(
+			{
+				relativePath: "CLAUDE.md",
+				envName: "claude",
+				base: null,
+				local: "L",
+				remote: "R",
+			},
+			{ config: cfg, resolver: stubResolver("# merged\n"), syncRepoDir },
+		);
+		expect(result.kind).toBe("staged");
+	});
+
 	it("returns fallback when the resolver throws — never propagates", async () => {
 		const cfg = { ...defaultMergeConfig(), enabled: true };
 		const resolver: MergeResolver = {
