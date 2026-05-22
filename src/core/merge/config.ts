@@ -5,11 +5,12 @@ import { z } from "zod";
 /**
  * Schema for `tools/merge-config.json` in the sync repo.
  *
- * `enabled` defaults to false in v1 — flipping the flag is its own issue.
- * When false, tryAiMerge short-circuits to fallback (keep-local).
+ * `enabled` defaults to true now that the AI-merge initiative is complete.
+ * When false, tryAiMerge short-circuits to fallback (keep-local). Set
+ * `"enabled": false` in `tools/merge-config.json` to disable AI-assisted merge.
  */
 export const MergeConfigSchema = z.object({
-	enabled: z.boolean().default(false),
+	enabled: z.boolean().default(true),
 	resolver: z.enum(["claude", "codex", "opencode"]).default("claude"),
 	autoApply: z.boolean().default(false),
 	timeoutSeconds: z.number().int().positive().default(60),

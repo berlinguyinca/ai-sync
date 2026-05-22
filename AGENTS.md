@@ -13,14 +13,28 @@ npm run format         # Biome format
 npm run typecheck      # tsc --noEmit
 ```
 
+### CLI surface
+
+```bash
+ai-sync init | push | pull [--auto-apply] | status [--verbose] [--summarize]
+ai-sync bootstrap <repo-url> | update | install-skills | env | migrate
+ai-sync resolve list | diff <path> | accept <path|--all> | reject <path|--all>
+```
+
+AI-assisted merge is configured via `tools/merge-config.json` in the sync repo
+(see `docs/merge-config.md`). It is enabled by default; set `"enabled": false`
+to opt out.
+
 ## Architecture
 
 - `src/cli/` — Commander.js CLI entry point and commands
 - `src/core/` — Sync engine, manifest (allowlist), path rewriter, backups, environments
+- `src/core/merge/` — AI-assisted 3-way merge (config, adapters, strategies, staging, orchestrator)
 - `src/git/` — Git wrapper (simple-git)
 - `src/platform/` — Cross-platform path resolution
 - `tests/` — Mirrors src/ structure, uses Vitest + memfs
 - `skills/` — Slash command definitions (`.AGENTS.md` / `.opencode.md`)
+- `tools/merge-config.json` (in the sync repo, not this repo) — AI-merge config; schema in `src/core/merge/config.ts`
 
 ## Conventions
 

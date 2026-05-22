@@ -1170,6 +1170,15 @@ describe("core/sync-engine", () => {
 		it("detects 3-way merge conflict in v2 and keeps local", async () => {
 			const { bareDir, syncRepoDir, claudeConfigDir, options } = await createV2TestEnv(tmpDir);
 
+			// Explicitly disable AI merge so this test asserts the legacy
+			// keep-local behavior regardless of the schema default.
+			await fs.mkdir(path.join(syncRepoDir, "tools"), { recursive: true });
+			await fs.writeFile(
+				path.join(syncRepoDir, "tools", "merge-config.json"),
+				JSON.stringify({ enabled: false }),
+				"utf-8",
+			);
+
 			// Push initial
 			await syncPush(options);
 

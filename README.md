@@ -205,20 +205,40 @@ ai-sync push -v               # show detailed file changes
 
 ### `ai-sync pull`
 
-Fetches remote changes and applies them to local config directories. Always creates a timestamped backup first.
+Fetches remote changes and applies them to local config directories. Always
+creates a timestamped backup first. On 3-way merge conflicts, ai-sync uses the
+[AI-assisted merge](#ai-assisted-merge) flow.
 
 ```bash
 ai-sync pull
 ai-sync pull -v               # show detailed file changes
+ai-sync pull --auto-apply     # apply AI merges directly instead of staging them
 ```
 
 ### `ai-sync status`
 
-Shows local modifications, remote drift, and excluded file count.
+Shows local modifications, remote drift, and excluded file count. With
+`--summarize`, asks the configured AI resolver for a natural-language summary
+of the drift (see [AI-assisted merge](#ai-assisted-merge) below).
 
 ```bash
 ai-sync status
-ai-sync status -v             # include branch, tracking info, synced file count
+ai-sync status -v             # include branch, tracking info, synced file count, pending merges
+ai-sync status --summarize    # AI-generated summary of local/remote drift
+```
+
+### `ai-sync resolve`
+
+Manage pending AI merges produced by `ai-sync pull`. See
+[AI-assisted merge](#ai-assisted-merge) below.
+
+```bash
+ai-sync resolve list                # list pending merges
+ai-sync resolve diff <path>         # show the staged merge vs the live file
+ai-sync resolve accept <path>       # apply a staged merge
+ai-sync resolve accept --all        # apply every pending merge
+ai-sync resolve reject <path>       # discard a staged merge
+ai-sync resolve reject --all        # discard every pending merge
 ```
 
 ### `ai-sync bootstrap <repo-url>`
@@ -289,6 +309,62 @@ ai-sync --no-update-check <command>   # skip the auto-update check
 ai-sync --version                      # show version
 ai-sync --help                         # show help
 ```
+
+## AI-assisted merge
+
+When `ai-sync pull` finds that the same file was modified locally and remotely,
+it can ask a local AI CLI (`claude`, `codex`, or `opencode`) to produce a
+3-way merge instead of dropping back to keep-local. The feature is
+**enabled by default**.
+
+By default, merges are staged under `<syncRepoDir>/.ai-sync/pending/<env>/<path>`
+so you can review them with `ai-sync resolve` before applying. Set
+`autoApply: true` (or pass `ai-sync pull --auto-apply`) to skip staging.
+
+### Configuration: `tools/merge-config.json`
+
+Drop a `tools/merge-config.json` at the root of your sync repo to tune the
+behavior. All fields are optional.
+
+```jsonc
+{
+  "enabled": true,            // master switch — set to false to disable AI merge
+  "resolver": "claude",       // "claude" | "codex" | "opencode"
+  "autoApply": false,         // false = stage under .ai-sync/pending/, true = write through
+  "timeoutSeconds": 60,       // per-file resolver timeout
+  "perType": {
+    "*.md":   "ai-freeform",
+    "*.json": "ai-validated",
+    "*.yaml": "ai-validated",
+    "*.yml":  "ai-validated",
+    "*.lock": "keep-local",
+    "*":      "keep-local"
+  }
+}
+```
+
+To disable AI-merge entirely, write:
+
+```jsonc
+{ "enabled": false }
+```
+
+See [`docs/merge-config.md`](docs/merge-config.md) for the full schema reference.
+
+### Reviewing pending merges
+
+```bash
+ai-sync resolve list                # show pending merges
+ai-sync resolve diff <path>         # diff the staged merge against the live file
+ai-sync resolve accept <path>       # apply one staged merge
+ai-sync resolve accept --all        # apply all pending merges
+ai-sync resolve reject <path>       # discard one staged merge
+ai-sync resolve reject --all        # discard all pending merges
+```
+
+`ai-sync status --verbose` also lists pending merges, and
+`ai-sync status --summarize` asks the configured resolver for a natural-language
+description of what differs between local, remote, and base.
 
 ## Environments
 
@@ -470,7 +546,8 @@ src/
 │   ├── environment.ts        # Environment definitions (Claude, OpenCode)
 │   ├── env-config.ts         # Per-machine environment preferences
 │   ├── env-helpers.ts        # Shared helpers (allowlist, path rewrite checks)
-│   └── migration.ts          # v1→v2 repo migration
+│   ├── migration.ts          # v1→v2 repo migration
+│   └── merge/                # AI-assisted 3-way merge (adapters, strategies, staging)
 ├── git/
 │   └── repo.ts               # Git operations wrapper (simple-git)
 ├── platform/

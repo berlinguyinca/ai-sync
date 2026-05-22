@@ -17,7 +17,7 @@ afterEach(async () => {
 describe("loadMergeConfig()", () => {
 	it("returns schema defaults when the file is absent", async () => {
 		const cfg = await loadMergeConfig(syncRepoDir);
-		expect(cfg.enabled).toBe(false);
+		expect(cfg.enabled).toBe(true);
 		expect(cfg.resolver).toBe("claude");
 		expect(cfg.autoApply).toBe(false);
 		expect(cfg.timeoutSeconds).toBe(60);
@@ -68,7 +68,7 @@ describe("loadMergeConfig()", () => {
 describe("defaultMergeConfig()", () => {
 	it("returns the same defaults as the loader for an absent file", () => {
 		const cfg = defaultMergeConfig();
-		expect(cfg.enabled).toBe(false);
+		expect(cfg.enabled).toBe(true);
 		expect(cfg.resolver).toBe("claude");
 		expect(cfg.timeoutSeconds).toBe(60);
 	});

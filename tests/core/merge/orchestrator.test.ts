@@ -47,7 +47,7 @@ describe("classifyFile()", () => {
 
 describe("tryAiMerge()", () => {
 	it("short-circuits to fallback when config.enabled is false", async () => {
-		const cfg = defaultMergeConfig();
+		const cfg = { ...defaultMergeConfig(), enabled: false };
 		expect(cfg.enabled).toBe(false);
 		let called = false;
 		const resolver: MergeResolver = {
