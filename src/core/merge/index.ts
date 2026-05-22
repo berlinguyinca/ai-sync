@@ -17,8 +17,17 @@ export type {
 	MergeResolver,
 } from "./resolver.js";
 export { ResolverError } from "./resolver.js";
-export type { StagedEntry, StageInput } from "./staging.js";
-export { ensureGitignoreEntry, listStaged, stage } from "./staging.js";
+export type { AcceptResult, StagedEntry, StageInput } from "./staging.js";
+export {
+	acceptStaged,
+	ensureGitignoreEntry,
+	getStagedContent,
+	listStaged,
+	rejectStaged,
+	removeFromManifest,
+	stage,
+	stagedFilePath,
+} from "./staging.js";
 export type {
 	StrategyName,
 	StrategyReason,

@@ -2,7 +2,16 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { ensureGitignoreEntry, listStaged, stage } from "../../../src/core/merge/staging.js";
+import {
+	acceptStaged,
+	ensureGitignoreEntry,
+	getStagedContent,
+	listStaged,
+	rejectStaged,
+	removeFromManifest,
+	stage,
+	stagedFilePath,
+} from "../../../src/core/merge/staging.js";
 
 let syncRepoDir: string;
 
@@ -141,5 +150,100 @@ describe("ensureGitignoreEntry()", () => {
 		});
 		const contents = await fs.readFile(path.join(syncRepoDir, ".gitignore"), "utf-8");
 		expect(contents).toContain(".ai-sync/pending/");
+	});
+});
+
+describe("getStagedContent()", () => {
+	it("returns the merged content for a staged entry", async () => {
+		await stage(syncRepoDir, {
+			envName: "claude",
+			relativePath: "CLAUDE.md",
+			mergedContent: "hello merged",
+			resolver: "claude",
+		});
+		const out = await getStagedContent(syncRepoDir, "claude", "CLAUDE.md");
+		expect(out).toBe("hello merged");
+	});
+
+	it("throws when staged file is missing", async () => {
+		await expect(getStagedContent(syncRepoDir, "claude", "missing.md")).rejects.toThrow();
+	});
+});
+
+describe("stagedFilePath()", () => {
+	it("composes the path under .ai-sync/pending/<env>/<rel>", () => {
+		const p = stagedFilePath(syncRepoDir, "claude", "agents/foo.md");
+		expect(p).toBe(path.join(syncRepoDir, ".ai-sync", "pending", "claude", "agents", "foo.md"));
+	});
+});
+
+describe("removeFromManifest()", () => {
+	it("removes a matching entry and returns true", async () => {
+		await stage(syncRepoDir, {
+			envName: "claude",
+			relativePath: "a.md",
+			mergedContent: "A",
+			resolver: "claude",
+		});
+		const removed = await removeFromManifest(syncRepoDir, "claude", "a.md");
+		expect(removed).toBe(true);
+		expect(await listStaged(syncRepoDir)).toEqual([]);
+	});
+
+	it("returns false when no entry matches", async () => {
+		const removed = await removeFromManifest(syncRepoDir, "claude", "none.md");
+		expect(removed).toBe(false);
+	});
+});
+
+describe("acceptStaged()", () => {
+	it("copies staged content to targetPath, deletes staged file, removes entry", async () => {
+		await stage(syncRepoDir, {
+			envName: "claude",
+			relativePath: "CLAUDE.md",
+			mergedContent: "final content",
+			resolver: "claude",
+		});
+		const targetPath = path.join(syncRepoDir, "live", "CLAUDE.md");
+		const result = await acceptStaged(syncRepoDir, "claude", "CLAUDE.md", targetPath);
+		expect(result.content).toBe("final content");
+		expect(result.targetPath).toBe(targetPath);
+		expect(await fs.readFile(targetPath, "utf-8")).toBe("final content");
+		await expect(
+			fs.access(path.join(syncRepoDir, ".ai-sync", "pending", "claude", "CLAUDE.md")),
+		).rejects.toThrow();
+		expect(await listStaged(syncRepoDir)).toEqual([]);
+	});
+
+	it("creates intermediate target directories", async () => {
+		await stage(syncRepoDir, {
+			envName: "claude",
+			relativePath: "agents/foo.md",
+			mergedContent: "f",
+			resolver: "claude",
+		});
+		const targetPath = path.join(syncRepoDir, "live", "agents", "foo.md");
+		await acceptStaged(syncRepoDir, "claude", "agents/foo.md", targetPath);
+		expect(await fs.readFile(targetPath, "utf-8")).toBe("f");
+	});
+});
+
+describe("rejectStaged()", () => {
+	it("deletes staged file and removes manifest entry", async () => {
+		await stage(syncRepoDir, {
+			envName: "claude",
+			relativePath: "CLAUDE.md",
+			mergedContent: "drop me",
+			resolver: "claude",
+		});
+		await rejectStaged(syncRepoDir, "claude", "CLAUDE.md");
+		await expect(
+			fs.access(path.join(syncRepoDir, ".ai-sync", "pending", "claude", "CLAUDE.md")),
+		).rejects.toThrow();
+		expect(await listStaged(syncRepoDir)).toEqual([]);
+	});
+
+	it("is a no-op when nothing is staged", async () => {
+		await expect(rejectStaged(syncRepoDir, "claude", "missing.md")).resolves.toBeUndefined();
 	});
 });

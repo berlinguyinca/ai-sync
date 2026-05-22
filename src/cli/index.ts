@@ -13,6 +13,7 @@ import { registerLinkCommand } from "./commands/link.js";
 import { registerMigrateCommand } from "./commands/migrate.js";
 import { registerPullCommand } from "./commands/pull.js";
 import { registerPushCommand } from "./commands/push.js";
+import { registerResolveCommand } from "./commands/resolve.js";
 import { registerStatusCommand } from "./commands/status.js";
 import { registerUpdateCommand } from "./commands/update.js";
 
@@ -72,6 +73,7 @@ registerEnvCommand(program);
 registerLinkCommand(program);
 registerMigrateCommand(program);
 registerFragmentCommand(program);
+registerResolveCommand(program);
 
 export { program };
 
