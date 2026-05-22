@@ -3,7 +3,13 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { simpleGit } from "simple-git";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { handleStatusDrift, printDriftReport } from "../../../src/cli/commands/status.js";
+import {
+	handleStatusDrift,
+	handleStatusSummarize,
+	printDriftReport,
+	printSummarizeResults,
+} from "../../../src/cli/commands/status.js";
+import type { DriftReport } from "../../../src/core/drift.js";
 import type { Environment } from "../../../src/core/environment.js";
 import { stage } from "../../../src/core/merge/staging.js";
 import { addFiles, addRemote, commitFiles, initRepo } from "../../../src/git/repo.js";
@@ -268,5 +274,144 @@ describe("printDriftReport", () => {
 	it("prints a dim placeholder when no envs are passed", () => {
 		printDriftReport([], false);
 		expect(logged()).toMatch(/No environments enabled/);
+	});
+});
+
+function makeReport(envName: string, overrides: Partial<DriftReport> = {}): DriftReport {
+	return {
+		envName,
+		localOnly: [],
+		remoteOnly: [],
+		bothChanged: [],
+		stagedPending: [],
+		...overrides,
+	};
+}
+
+describe("handleStatusSummarize", () => {
+	it("does NOT invoke the resolver when every env is clean", async () => {
+		const available = vi.fn().mockResolvedValue(true);
+		const summarize = vi.fn().mockResolvedValue("never called");
+		const results = await handleStatusSummarize(
+			[makeReport("claude"), makeReport("opencode")],
+			"claude",
+			{ availableFn: available, summarizeFn: summarize },
+		);
+		expect(summarize).not.toHaveBeenCalled();
+		expect(results.every((r) => r.status === "skipped-no-drift")).toBe(true);
+	});
+
+	it("invokes the resolver exactly once per env-with-drift and returns summaries", async () => {
+		const available = vi.fn().mockResolvedValue(true);
+		const summarize = vi
+			.fn()
+			.mockImplementation(async (_name: string, prompt: string) =>
+				prompt.includes("claude") ? "claude moved CLAUDE.md" : "opencode tweaked theme",
+			);
+		const reports = [
+			makeReport("claude", { localOnly: ["CLAUDE.md"] }),
+			makeReport("opencode", { remoteOnly: ["settings.json"] }),
+		];
+		const results = await handleStatusSummarize(reports, "claude", {
+			availableFn: available,
+			summarizeFn: summarize,
+		});
+		expect(summarize).toHaveBeenCalledTimes(2);
+		expect(results.find((r) => r.envName === "claude")?.status).toBe("ok");
+		expect(results.find((r) => r.envName === "claude")?.summary).toMatch(/claude moved/);
+		expect(results.find((r) => r.envName === "opencode")?.summary).toMatch(/opencode tweaked/);
+	});
+
+	it("does not call the resolver per-file — a single env-with-drift yields one call", async () => {
+		const available = vi.fn().mockResolvedValue(true);
+		const summarize = vi.fn().mockResolvedValue("ok");
+		await handleStatusSummarize(
+			[
+				makeReport("claude", {
+					localOnly: ["a.md", "b.md", "c.md"],
+					remoteOnly: ["d.md"],
+					bothChanged: ["e.md"],
+				}),
+			],
+			"claude",
+			{ availableFn: available, summarizeFn: summarize },
+		);
+		expect(summarize).toHaveBeenCalledTimes(1);
+	});
+
+	it("marks env as unavailable when adapter.available() returns false and never invokes resolver", async () => {
+		const available = vi.fn().mockResolvedValue(false);
+		const summarize = vi.fn().mockResolvedValue("never");
+		const results = await handleStatusSummarize(
+			[makeReport("claude", { localOnly: ["CLAUDE.md"] })],
+			"claude",
+			{ availableFn: available, summarizeFn: summarize },
+		);
+		expect(summarize).not.toHaveBeenCalled();
+		expect(results[0].status).toBe("unavailable");
+	});
+
+	it("captures resolver errors per-env without aborting the report", async () => {
+		const available = vi.fn().mockResolvedValue(true);
+		const summarize = vi
+			.fn()
+			.mockImplementationOnce(async () => {
+				throw new Error("boom");
+			})
+			.mockImplementationOnce(async () => "fine");
+		const results = await handleStatusSummarize(
+			[
+				makeReport("claude", { localOnly: ["a.md"] }),
+				makeReport("opencode", { localOnly: ["b.md"] }),
+			],
+			"claude",
+			{ availableFn: available, summarizeFn: summarize },
+		);
+		expect(results[0].status).toBe("error");
+		expect(results[0].error).toMatch(/boom/);
+		expect(results[1].status).toBe("ok");
+		expect(results[1].summary).toBe("fine");
+	});
+
+	it("treats availableFn rejection as unavailable", async () => {
+		const available = vi.fn().mockRejectedValue(new Error("probe failed"));
+		const summarize = vi.fn().mockResolvedValue("never");
+		const results = await handleStatusSummarize(
+			[makeReport("claude", { localOnly: ["a.md"] })],
+			"claude",
+			{ availableFn: available, summarizeFn: summarize },
+		);
+		expect(summarize).not.toHaveBeenCalled();
+		expect(results[0].status).toBe("unavailable");
+	});
+});
+
+describe("printSummarizeResults", () => {
+	it("prints the summary text under the env header for ok results", () => {
+		printSummarizeResults(
+			[{ envName: "claude", status: "ok", summary: "two-line\nsummary" }],
+			"claude",
+		);
+		const out = logged();
+		expect(out).toMatch(/Summary \(via claude\):/);
+		expect(out).toContain("two-line");
+		expect(out).toContain("summary");
+	});
+
+	it("prints a yellow warning when the resolver is unavailable", () => {
+		printSummarizeResults([{ envName: "claude", status: "unavailable" }], "claude");
+		expect(logged()).toMatch(/not available/);
+	});
+
+	it("prints a per-env warning on error", () => {
+		printSummarizeResults([{ envName: "claude", status: "error", error: "boom" }], "claude");
+		const out = logged();
+		expect(out).toMatch(/Summary skipped for claude/);
+		expect(out).toContain("boom");
+	});
+
+	it("emits nothing for skipped-no-drift entries", () => {
+		printSummarizeResults([{ envName: "claude", status: "skipped-no-drift" }], "claude");
+		expect(logSpy.mock.calls.length).toBe(0);
 	});
 });

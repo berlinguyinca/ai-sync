@@ -6,6 +6,10 @@ import pc from "picocolors";
 import { classifyDrift, type DriftReport } from "../../core/drift.js";
 import { getEnabledEnvironmentInstances } from "../../core/env-config.js";
 import type { Environment } from "../../core/environment.js";
+import { createAdapter } from "../../core/merge/adapters/index.js";
+import { loadMergeConfig } from "../../core/merge/config.js";
+import { buildSummaryPrompt, type SummaryDiffData } from "../../core/merge/prompts.js";
+import { summarizeWithResolver } from "../../core/merge/summarize.js";
 import { verifyTool } from "../../core/provisioner.js";
 import type { SyncStatusResult } from "../../core/sync-engine.js";
 import { syncStatus } from "../../core/sync-engine.js";
@@ -13,6 +17,9 @@ import { ToolManifestSchema } from "../../core/tool-manifest.js";
 import { fetchRemote, hasRemote } from "../../git/repo.js";
 import { getClaudeDir, getSyncRepoDir } from "../../platform/paths.js";
 import { printFileChanges } from "../format.js";
+
+/** Maximum number of lines of file-path payload to ship to the resolver per env. */
+const SUMMARIZE_LINE_CAP = 200;
 
 /**
  * Options for the status command handler.
@@ -22,10 +29,32 @@ export interface StatusOptions {
 	claudeDir?: string;
 	env?: string;
 	verbose?: boolean;
+	/** Opt-in: ask the configured resolver to produce a drift summary. */
+	summarize?: boolean;
 	/** Override the environment list (testing). */
 	environments?: Environment[];
 	/** Override the home dir used for path-rewrite normalization (testing). */
 	homeDir?: string;
+	/** Test seam: override the availability probe (`adapter.available()`). */
+	availableFn?: (resolverName: string) => Promise<boolean>;
+	/** Test seam: override the resolver invocation used for summarize. */
+	summarizeFn?: (resolverName: string, prompt: string) => Promise<string>;
+}
+
+/**
+ * Aggregated outcome of `ai-sync status --summarize` per env. Exported for
+ * tests that want to assert resolver invocation count without parsing
+ * stdout.
+ */
+export interface SummarizeResult {
+	envName: string;
+	/** "ok" — resolver returned a summary; text is in `summary`. */
+	/** "skipped-no-drift" — env had zero drift, resolver not invoked. */
+	/** "unavailable" — adapter.available() returned false. */
+	/** "error" — resolver call rejected; message captured. */
+	status: "ok" | "skipped-no-drift" | "unavailable" | "error";
+	summary?: string;
+	error?: string;
 }
 
 /**
@@ -146,6 +175,122 @@ export function printDriftReport(reports: DriftReport[], verbose: boolean): void
 }
 
 /**
+ * Translates a drift report into the SummaryDiffData payload, capping the
+ * combined entry count so we never ship an unbounded prompt to the
+ * resolver.
+ */
+function buildDiffDataFromReport(r: DriftReport, lineCap: number): SummaryDiffData {
+	const data: SummaryDiffData = { localOnly: [], remoteOnly: [], bothChanged: [] };
+	let remaining = lineCap;
+	const push = (
+		bucket: "localOnly" | "remoteOnly" | "bothChanged",
+		files: string[],
+		side: "local" | "remote" | "both",
+	): void => {
+		for (const relativePath of files) {
+			if (remaining <= 0) return;
+			data[bucket].push({ relativePath, side });
+			remaining--;
+		}
+	};
+	push("bothChanged", r.bothChanged, "both");
+	push("localOnly", r.localOnly, "local");
+	push("remoteOnly", r.remoteOnly, "remote");
+	return data;
+}
+
+/**
+ * Default availability probe — instantiates the configured adapter and
+ * delegates to `adapter.available()`.
+ */
+async function defaultAvailable(resolverName: string): Promise<boolean> {
+	const adapter = createAdapter(resolverName as "claude" | "codex" | "opencode");
+	return adapter.available();
+}
+
+/**
+ * Runs the resolver in "summarize differences" mode for every env that
+ * has any drift. Returns one entry per env in the input order so callers
+ * can render output in a deterministic layout. Never throws — resolver
+ * failures are captured per-env.
+ */
+export async function handleStatusSummarize(
+	reports: DriftReport[],
+	resolverName: "claude" | "codex" | "opencode",
+	options: {
+		availableFn?: (name: string) => Promise<boolean>;
+		summarizeFn?: (name: string, prompt: string) => Promise<string>;
+		timeoutMs?: number;
+	} = {},
+): Promise<SummarizeResult[]> {
+	const availableFn = options.availableFn ?? defaultAvailable;
+	const summarizeFn =
+		options.summarizeFn ??
+		((name, prompt) =>
+			summarizeWithResolver(name as "claude" | "codex" | "opencode", prompt, {
+				timeoutMs: options.timeoutMs,
+			}));
+
+	// Probe availability once — the same resolver is used for every env.
+	let isAvailable = false;
+	try {
+		isAvailable = await availableFn(resolverName);
+	} catch {
+		isAvailable = false;
+	}
+
+	const results: SummarizeResult[] = [];
+	for (const r of reports) {
+		const hasDrift = r.localOnly.length + r.remoteOnly.length + r.bothChanged.length > 0;
+		if (!hasDrift) {
+			results.push({ envName: r.envName, status: "skipped-no-drift" });
+			continue;
+		}
+		if (!isAvailable) {
+			results.push({ envName: r.envName, status: "unavailable" });
+			continue;
+		}
+		const diffData = buildDiffDataFromReport(r, SUMMARIZE_LINE_CAP);
+		const prompt = buildSummaryPrompt(r.envName, diffData);
+		try {
+			const summary = await summarizeFn(resolverName, prompt);
+			results.push({ envName: r.envName, status: "ok", summary: summary.trim() });
+		} catch (err) {
+			results.push({
+				envName: r.envName,
+				status: "error",
+				error: err instanceof Error ? err.message : String(err),
+			});
+		}
+	}
+	return results;
+}
+
+/**
+ * Renders summarize results under each env header. Mirrors
+ * {@link printDriftReport} formatting conventions.
+ */
+export function printSummarizeResults(results: SummarizeResult[], resolverName: string): void {
+	for (const r of results) {
+		if (r.status === "ok") {
+			console.log(pc.cyan(`  Summary (via ${resolverName}):`));
+			for (const line of (r.summary ?? "").split("\n")) {
+				console.log(`    ${line}`);
+			}
+		} else if (r.status === "unavailable") {
+			console.log(
+				pc.yellow(
+					`  Resolver '${resolverName}' not available — install or change tools/merge-config.json`,
+				),
+			);
+		} else if (r.status === "error") {
+			console.log(pc.yellow(`  Summary skipped for ${r.envName}: ${r.error ?? "unknown error"}`));
+		}
+		// skipped-no-drift: silent — counts already showed 0s.
+	}
+}
+
+/**
  * Registers the "status" subcommand on the CLI program.
  */
 export function registerStatusCommand(program: Command): void {
@@ -156,6 +301,11 @@ export function registerStatusCommand(program: Command): void {
 		.option("--claude-dir <path>", "Custom ~/.claude path", getClaudeDir())
 		.option("-v, --verbose", "Show detailed sync info", false)
 		.option("--env <id>", "Show status for a specific environment only")
+		.option(
+			"--summarize",
+			"Invoke the configured AI resolver to produce a natural-language drift summary",
+			false,
+		)
 		.action(async (opts) => {
 			try {
 				const result = await handleStatus(opts);
@@ -169,6 +319,25 @@ export function registerStatusCommand(program: Command): void {
 				try {
 					const drift = await handleStatusDrift(opts);
 					printDriftReport(drift, !!opts.verbose);
+					if (opts.summarize) {
+						try {
+							const mergeConfig = await loadMergeConfig(opts.repoPath ?? getSyncRepoDir());
+							const results = await handleStatusSummarize(drift, mergeConfig.resolver, {
+								availableFn: opts.availableFn,
+								summarizeFn: opts.summarizeFn,
+								timeoutMs: mergeConfig.timeoutSeconds * 1000,
+							});
+							printSummarizeResults(results, mergeConfig.resolver);
+						} catch (summaryErr) {
+							console.log(
+								pc.yellow(
+									`Summary skipped: ${
+										summaryErr instanceof Error ? summaryErr.message : String(summaryErr)
+									}`,
+								),
+							);
+						}
+					}
 				} catch (driftErr) {
 					if (opts.verbose) {
 						console.error(
