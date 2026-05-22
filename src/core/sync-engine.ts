@@ -13,6 +13,11 @@ import {
 import { createBackup } from "./backup.js";
 import { makeAllowlistFn, needsPathRewrite } from "./env-helpers.js";
 import type { Environment } from "./environment.js";
+import { createAdapter } from "./merge/adapters/index.js";
+import { defaultMergeConfig, loadMergeConfig, type MergeConfig } from "./merge/config.js";
+import { tryAiMerge } from "./merge/index.js";
+import type { MergeResolver } from "./merge/resolver.js";
+import type { StagedEntry } from "./merge/staging.js";
 import { detectRepoVersion, migrateToV3 } from "./migration.js";
 import { expandPathsForLocal, rewritePathsForRepo } from "./path-rewriter.js";
 import type { ProvisionResult } from "./provisioner.js";
@@ -96,9 +101,16 @@ export interface SyncPullResult {
 	fileChanges: FileChange[];
 	/** Files skipped because both local and remote had changes (merge conflict). */
 	conflicts?: FileChange[];
+	/** Conflict resolutions staged for review under <syncRepo>/.ai-sync/pending/. */
+	staged?: StagedEntry[];
 	perEnvironment?: Record<
 		string,
-		{ filesApplied: number; fileChanges: FileChange[]; conflicts?: FileChange[] }
+		{
+			filesApplied: number;
+			fileChanges: FileChange[];
+			conflicts?: FileChange[];
+			staged?: StagedEntry[];
+		}
 	>;
 	/** Errors encountered per environment (non-fatal). */
 	errors?: Record<string, string>;
@@ -456,12 +468,39 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 	verboseLog(options, `Repo version: v${version}`);
 	const allFileChanges: FileChange[] = [];
 	const allConflicts: FileChange[] = [];
+	const allStaged: StagedEntry[] = [];
 	let backupDir = "";
 	let totalApplied = 0;
 	const perEnvironment: Record<
 		string,
-		{ filesApplied: number; fileChanges: FileChange[]; conflicts?: FileChange[] }
+		{
+			filesApplied: number;
+			fileChanges: FileChange[];
+			conflicts?: FileChange[];
+			staged?: StagedEntry[];
+		}
 	> = {};
+
+	// Load merge config + resolver lazily — defaults disable AI merge.
+	let mergeConfig: MergeConfig;
+	try {
+		mergeConfig = await loadMergeConfig(syncRepoDir);
+	} catch (err) {
+		verboseLog(
+			options,
+			`Invalid tools/merge-config.json — disabling AI merge: ${(err as Error).message}`,
+		);
+		mergeConfig = defaultMergeConfig();
+	}
+	let mergeResolver: MergeResolver | undefined;
+	if (mergeConfig.enabled) {
+		try {
+			mergeResolver = createAdapter(mergeConfig.resolver);
+		} catch (err) {
+			verboseLog(options, `Failed to construct adapter: ${(err as Error).message}`);
+			mergeConfig = { ...mergeConfig, enabled: false };
+		}
+	}
 	const errors: Record<string, string> = {};
 	const envs = options.filterEnv
 		? (options.environments ?? []).filter((e) => e.id === options.filterEnv)
@@ -535,6 +574,7 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 				const allowlistFn = makeAllowlistFn(env);
 				const envChanges: FileChange[] = [];
 				const envConflicts: FileChange[] = [];
+				const envStaged: StagedEntry[] = [];
 				const prePull = prePullContents.get(env.id) ?? new Map<string, string>();
 
 				let repoFiles: string[] = [];
@@ -630,13 +670,50 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 								type: "modified",
 							});
 						} else {
-							// Both changed — conflict, keep local version
-							verboseLog(options, `Conflict (keeping local): ${relativePath}`);
-							envConflicts.push({ path: relativePath, type: "modified" });
-							allConflicts.push({
-								path: `${env.id}/${relativePath}`,
-								type: "modified",
-							});
+							// Both changed — conflict. Try AI-assisted merge if enabled;
+							// otherwise (or on any resolver failure) fall back to keep-local.
+							let aiHandled = false;
+							if (mergeConfig.enabled && mergeResolver) {
+								const merge = await tryAiMerge(
+									{
+										relativePath,
+										envName: env.id,
+										base: baseContent,
+										local: localContent,
+										remote: remoteContent,
+									},
+									{
+										config: mergeConfig,
+										resolver: mergeResolver,
+										syncRepoDir,
+										warn: (m) => verboseLog(options, m),
+									},
+								);
+								if (merge.kind === "staged") {
+									envStaged.push(merge.entry);
+									allStaged.push(merge.entry);
+									aiHandled = true;
+								} else if (merge.kind === "applied") {
+									if (!options.dryRun) {
+										await fs.mkdir(path.dirname(destPath), { recursive: true });
+										await writeFilePreservingMode(srcPath, destPath, merge.mergedContent);
+									}
+									envChanges.push({ path: relativePath, type: "modified" });
+									allFileChanges.push({
+										path: `${env.id}/${relativePath}`,
+										type: "modified",
+									});
+									aiHandled = true;
+								}
+							}
+							if (!aiHandled) {
+								verboseLog(options, `Conflict (keeping local): ${relativePath}`);
+								envConflicts.push({ path: relativePath, type: "modified" });
+								allConflicts.push({
+									path: `${env.id}/${relativePath}`,
+									type: "modified",
+								});
+							}
 						}
 					}
 				}
@@ -699,6 +776,7 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 					filesApplied: repoFiles.length,
 					fileChanges: envChanges,
 					conflicts: envConflicts.length > 0 ? envConflicts : undefined,
+					staged: envStaged.length > 0 ? envStaged : undefined,
 				};
 			} catch (err) {
 				errors[env.id] = err instanceof Error ? err.message : String(err);
@@ -871,7 +949,9 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 			// No manifest or invalid — log in verbose mode
 			if (options.verbose) {
 				console.warn(
-					pc.yellow(`  [verbose] Provisioning skipped: ${provErr instanceof Error ? provErr.message : String(provErr)}`),
+					pc.yellow(
+						`  [verbose] Provisioning skipped: ${provErr instanceof Error ? provErr.message : String(provErr)}`,
+					),
 				);
 			}
 		}
@@ -885,6 +965,7 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 			: `Applied ${totalApplied} files from remote. Backup at: ${backupDir}${conflictSuffix}`,
 		fileChanges: allFileChanges,
 		conflicts: allConflicts.length > 0 ? allConflicts : undefined,
+		staged: allStaged.length > 0 ? allStaged : undefined,
 		perEnvironment: Object.keys(perEnvironment).length > 0 ? perEnvironment : undefined,
 		errors: hasErrors ? errors : undefined,
 		dryRun: options.dryRun,

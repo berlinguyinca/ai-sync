@@ -62,11 +62,7 @@ async function createTestEnv(baseDir: string) {
 /**
  * Creates a mock Environment object for v2 multi-environment tests.
  */
-function createMockEnvironment(
-	id: string,
-	displayName: string,
-	configDir: string,
-): Environment {
+function createMockEnvironment(id: string, displayName: string, configDir: string): Environment {
 	return {
 		id,
 		displayName,
@@ -965,10 +961,7 @@ describe("core/sync-engine", () => {
 			expect(result.perEnvironment?.opencode).toBeDefined();
 
 			// Verify files are in subdirectories
-			const claudeMd = await fs.readFile(
-				path.join(syncRepoDir, "claude", "CLAUDE.md"),
-				"utf-8",
-			);
+			const claudeMd = await fs.readFile(path.join(syncRepoDir, "claude", "CLAUDE.md"), "utf-8");
 			expect(claudeMd).toBe("# Claude Config");
 
 			const agentMd = await fs.readFile(
@@ -1002,16 +995,11 @@ describe("core/sync-engine", () => {
 			expect(result.perEnvironment?.opencode).toBeUndefined();
 
 			// Claude files should exist
-			const claudeMd = await fs.readFile(
-				path.join(syncRepoDir, "claude", "CLAUDE.md"),
-				"utf-8",
-			);
+			const claudeMd = await fs.readFile(path.join(syncRepoDir, "claude", "CLAUDE.md"), "utf-8");
 			expect(claudeMd).toBe("# Claude Config");
 
 			// Opencode subdir should NOT exist
-			await expect(
-				fs.access(path.join(syncRepoDir, "opencode")),
-			).rejects.toThrow();
+			await expect(fs.access(path.join(syncRepoDir, "opencode"))).rejects.toThrow();
 		});
 
 		it("skips environments whose config dir does not exist", async () => {
@@ -1095,8 +1083,8 @@ describe("core/sync-engine", () => {
 					(call) => typeof call[0] === "string" && call[0].includes("[verbose]"),
 				);
 				// Should include "Processing environment:" messages
-				const envMessages = verboseCalls.filter(
-					(call) => call[0].includes("Processing environment"),
+				const envMessages = verboseCalls.filter((call) =>
+					call[0].includes("Processing environment"),
 				);
 				expect(envMessages.length).toBeGreaterThan(0);
 			} finally {
@@ -1126,10 +1114,7 @@ describe("core/sync-engine", () => {
 			expect(result.perEnvironment?.opencode).toBeDefined();
 
 			// Verify files were restored
-			const claudeMd = await fs.readFile(
-				path.join(claudeConfigDir, "CLAUDE.md"),
-				"utf-8",
-			);
+			const claudeMd = await fs.readFile(path.join(claudeConfigDir, "CLAUDE.md"), "utf-8");
 			expect(claudeMd).toBe("# Claude Config");
 
 			const agentMd = await fs.readFile(
@@ -1164,10 +1149,7 @@ describe("core/sync-engine", () => {
 			expect(pullResult.filesApplied).toBeGreaterThan(0);
 
 			// settings.json should have expanded paths for the new home
-			const settings = await fs.readFile(
-				path.join(newClaudeDir, "settings.json"),
-				"utf-8",
-			);
+			const settings = await fs.readFile(path.join(newClaudeDir, "settings.json"), "utf-8");
 			expect(settings).toContain(newHomeDir);
 			expect(settings).not.toContain("{{HOME}}");
 		});
@@ -1213,6 +1195,103 @@ describe("core/sync-engine", () => {
 			expect(result.conflicts).toBeDefined();
 			expect(result.conflicts!.length).toBeGreaterThan(0);
 			expect(result.perEnvironment?.claude?.conflicts).toBeDefined();
+		});
+
+		it("v2 conflict with merge-config enabled=false keeps byte-identical keep-local behavior", async () => {
+			const { bareDir, syncRepoDir, claudeConfigDir, options } = await createV2TestEnv(tmpDir);
+
+			// Explicit enabled:false config file — behavior must match the default-absent case.
+			await fs.mkdir(path.join(syncRepoDir, "tools"), { recursive: true });
+			await fs.writeFile(
+				path.join(syncRepoDir, "tools", "merge-config.json"),
+				JSON.stringify({ enabled: false }),
+				"utf-8",
+			);
+			await syncPush(options);
+
+			const cloneDir = path.join(tmpDir, "clone-v2-merge-off");
+			await fs.mkdir(cloneDir, { recursive: true });
+			await simpleGit(cloneDir).clone(bareDir, ".");
+			await simpleGit(cloneDir).addConfig("user.email", "test@test.com");
+			await simpleGit(cloneDir).addConfig("user.name", "Test");
+			await fs.writeFile(path.join(cloneDir, "claude", "CLAUDE.md"), "# Remote off");
+			await addFiles(cloneDir, ["claude/CLAUDE.md"]);
+			await commitFiles(cloneDir, "remote off");
+			await simpleGit(cloneDir).push("origin", "main");
+
+			await fs.writeFile(path.join(claudeConfigDir, "CLAUDE.md"), "# Local off");
+
+			const result = await syncPull(options);
+
+			expect(result.conflicts).toBeDefined();
+			expect(result.conflicts!.length).toBeGreaterThan(0);
+			expect(result.staged).toBeUndefined();
+			// Pending dir should not be created when the flag is off.
+			await expect(fs.access(path.join(syncRepoDir, ".ai-sync", "pending"))).rejects.toThrow();
+			const content = await fs.readFile(path.join(claudeConfigDir, "CLAUDE.md"), "utf-8");
+			expect(content).toBe("# Local off");
+		});
+
+		it("v2 conflict with merge-config enabled=true and stub resolver stages the merge", async () => {
+			// We can't inject a stub adapter through the public syncPull API in v1,
+			// so we point the config at the claude adapter but stub the `claude`
+			// binary via PATH manipulation through env. Easier: write a fake claude
+			// shim into the worktree and prepend it to PATH for the duration of
+			// this test. Cross-platform tradeoff: this test runs only on posix.
+			if (process.platform === "win32") return;
+			const { bareDir, syncRepoDir, claudeConfigDir, options } = await createV2TestEnv(tmpDir);
+
+			// Fake claude shim that always echoes "MERGED-OUTPUT".
+			const shimDir = path.join(tmpDir, "shim-bin");
+			await fs.mkdir(shimDir, { recursive: true });
+			const shimPath = path.join(shimDir, "claude");
+			await fs.writeFile(shimPath, `#!/usr/bin/env bash\necho 'MERGED-OUTPUT'\n`, "utf-8");
+			await fs.chmod(shimPath, 0o755);
+
+			await fs.mkdir(path.join(syncRepoDir, "tools"), { recursive: true });
+			await fs.writeFile(
+				path.join(syncRepoDir, "tools", "merge-config.json"),
+				JSON.stringify({ enabled: true, resolver: "claude" }),
+				"utf-8",
+			);
+			await syncPush(options);
+
+			const cloneDir = path.join(tmpDir, "clone-v2-merge-on");
+			await fs.mkdir(cloneDir, { recursive: true });
+			await simpleGit(cloneDir).clone(bareDir, ".");
+			await simpleGit(cloneDir).addConfig("user.email", "test@test.com");
+			await simpleGit(cloneDir).addConfig("user.name", "Test");
+			await fs.writeFile(path.join(cloneDir, "claude", "CLAUDE.md"), "# Remote on");
+			await addFiles(cloneDir, ["claude/CLAUDE.md"]);
+			await commitFiles(cloneDir, "remote on");
+			await simpleGit(cloneDir).push("origin", "main");
+
+			await fs.writeFile(path.join(claudeConfigDir, "CLAUDE.md"), "# Local on");
+
+			const originalPath = process.env.PATH;
+			process.env.PATH = `${shimDir}${path.delimiter}${originalPath}`;
+			let result: Awaited<ReturnType<typeof syncPull>>;
+			try {
+				result = await syncPull(options);
+			} finally {
+				process.env.PATH = originalPath;
+			}
+
+			expect(result.staged).toBeDefined();
+			expect(result.staged!.length).toBeGreaterThan(0);
+			expect(result.staged![0].envName).toBe("claude");
+			expect(result.staged![0].relativePath).toBe("CLAUDE.md");
+			// Conflicts array should NOT include this file — it was handled by staging.
+			expect(result.conflicts).toBeUndefined();
+
+			const stagedFile = await fs.readFile(
+				path.join(syncRepoDir, ".ai-sync", "pending", "claude", "CLAUDE.md"),
+				"utf-8",
+			);
+			expect(stagedFile.trim()).toBe("MERGED-OUTPUT");
+			// Live config file is still the local version (staged review pattern).
+			const live = await fs.readFile(path.join(claudeConfigDir, "CLAUDE.md"), "utf-8");
+			expect(live).toBe("# Local on");
 		});
 
 		it("force overrides conflicts in v2 pull", async () => {
@@ -1263,13 +1342,9 @@ describe("core/sync-engine", () => {
 			const result = await syncPull(options);
 
 			// Local file should be deleted
-			await expect(
-				fs.access(path.join(claudeConfigDir, "commands", "test.md")),
-			).rejects.toThrow();
+			await expect(fs.access(path.join(claudeConfigDir, "commands", "test.md"))).rejects.toThrow();
 
-			const deletedChange = result.fileChanges.find((c) =>
-				c.path.includes("commands/test.md"),
-			);
+			const deletedChange = result.fileChanges.find((c) => c.path.includes("commands/test.md"));
 			expect(deletedChange).toBeDefined();
 			expect(deletedChange?.type).toBe("deleted");
 		});
@@ -1291,10 +1366,7 @@ describe("core/sync-engine", () => {
 			await commitFiles(cloneDir, "dry run remote change");
 			await simpleGit(cloneDir).push("origin", "main");
 
-			const localBefore = await fs.readFile(
-				path.join(claudeConfigDir, "CLAUDE.md"),
-				"utf-8",
-			);
+			const localBefore = await fs.readFile(path.join(claudeConfigDir, "CLAUDE.md"), "utf-8");
 
 			const result = await syncPull({ ...options, dryRun: true });
 
@@ -1302,10 +1374,7 @@ describe("core/sync-engine", () => {
 			expect(result.message).toContain("Dry run");
 
 			// Local file should NOT have changed
-			const localAfter = await fs.readFile(
-				path.join(claudeConfigDir, "CLAUDE.md"),
-				"utf-8",
-			);
+			const localAfter = await fs.readFile(path.join(claudeConfigDir, "CLAUDE.md"), "utf-8");
 			expect(localAfter).toBe(localBefore);
 		});
 
@@ -1485,9 +1554,7 @@ describe("core/sync-engine", () => {
 			const result = await syncPull({ ...options, force: true });
 
 			// File should be deleted
-			await expect(
-				fs.access(path.join(claudeDir, "agents", "default.md")),
-			).rejects.toThrow();
+			await expect(fs.access(path.join(claudeDir, "agents", "default.md"))).rejects.toThrow();
 			expect(result.conflicts).toBeUndefined();
 		});
 
@@ -1516,8 +1583,7 @@ describe("core/sync-engine", () => {
 				await syncPull({ ...options, verbose: true });
 
 				const verboseCalls = consoleSpy.mock.calls.filter(
-					(call) =>
-						typeof call[0] === "string" && call[0].includes("Conflict (keeping local)"),
+					(call) => typeof call[0] === "string" && call[0].includes("Conflict (keeping local)"),
 				);
 				expect(verboseCalls.length).toBeGreaterThan(0);
 			} finally {
