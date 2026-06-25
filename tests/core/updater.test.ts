@@ -215,19 +215,13 @@ describe("core/updater", () => {
 			mockedExecSync.mockImplementationOnce(() => "aaaaaaa1234567890ab\n");
 			// Mock git rev-parse origin/main (remote) — different
 			mockedExecSync.mockImplementationOnce(() => "bbbbbbb9876543210cd\n");
-			// Mock git reset --hard
-			mockedExecSync.mockImplementationOnce(() => Buffer.from(""));
-			// Mock npm install
-			mockedExecSync.mockImplementationOnce(() => Buffer.from(""));
-			// Mock npm run build
-			mockedExecSync.mockImplementationOnce(() => Buffer.from(""));
-			// Mock git rev-parse --short HEAD
-			mockedExecSync.mockImplementationOnce(() => "bbbbbbb\n");
 
+			// startupUpdateCheck is notify-only by design (it must not execute
+			// remote code unprompted); the user runs `ai-sync update` to apply.
 			const result = await startupUpdateCheck();
 
 			expect(result).not.toBeNull();
-			expect(result).toContain("ai-sync updated");
+			expect(result).toContain("ai-sync update available");
 			expect(result).toContain("aaaaaaa");
 			expect(result).toContain("bbbbbbb");
 		});
