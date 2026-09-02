@@ -79,12 +79,14 @@ export { program };
 
 // Only parse when run directly (not imported as a module)
 // Check if this file is the entry point
+// ponytail: normalize Windows backslashes so the entry-point check works cross-platform
+const entry = process.argv[1]?.replace(/\\/g, "/");
 const isDirectRun =
 	typeof process !== "undefined" &&
-	process.argv[1] &&
-	(process.argv[1].endsWith("/cli/index.ts") ||
-		process.argv[1].endsWith("/cli.js") ||
-		process.argv[1].endsWith("/ai-sync"));
+	entry &&
+	(entry.endsWith("/cli/index.ts") ||
+		entry.endsWith("/cli.js") ||
+		entry.endsWith("/ai-sync"));
 
 if (isDirectRun) {
 	// Run startup update check before parsing commands

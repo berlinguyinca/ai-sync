@@ -45,7 +45,11 @@ export async function isGitRepo(dirPath: string): Promise<boolean> {
  * @param files - Array of relative file paths to stage
  */
 export async function addFiles(repoPath: string, files: string[]): Promise<void> {
-	await simpleGit(repoPath).add(files);
+	// ponytail: batch to stay under the Windows ~32K command-line limit (ENAMETOOLONG with many skills)
+	const git = simpleGit(repoPath);
+	for (let i = 0; i < files.length; i += 100) {
+		await git.add(files.slice(i, i + 100));
+	}
 }
 
 /**
