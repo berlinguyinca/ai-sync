@@ -1,6 +1,6 @@
 import * as os from "node:os";
 import * as path from "node:path";
-import { getCodexConfigDir } from "../platform/paths.js";
+import { getCodexConfigDir, getPiConfigDir } from "../platform/paths.js";
 
 /**
  * Represents an AI tool environment (e.g., Claude Code, OpenCode) whose
@@ -204,12 +204,74 @@ export class AntigravityEnvironment implements Environment {
 	}
 }
 
+/**
+ * Pi coding agent environment — config lives at PI_CODING_AGENT_DIR or ~/.pi/agent.
+ *
+ * Only portable, credential-free entries are synced. The ignore patterns are a
+ * second line of defence so secrets and machine state never sync even when they
+ * sit inside an otherwise-synced directory.
+ */
+export class PiEnvironment implements Environment {
+	readonly id = "pi";
+	readonly displayName = "Pi";
+
+	getConfigDir(): string {
+		return getPiConfigDir();
+	}
+
+	getSyncTargets(): readonly string[] {
+		return [
+			"extensions/",
+			"engineering-panel/",
+			"bin/",
+			"prompts/",
+			"skills/",
+			"AGENTS.md",
+			"settings.json",
+		];
+	}
+
+	getPluginSyncPatterns(): readonly string[] {
+		return [];
+	}
+
+	getIgnorePatterns(): readonly string[] {
+		return [
+			"auth.json",
+			"models.json",
+			"models-store.json",
+			"engineering.yaml",
+			"*.bak*",
+			"*pre-*",
+			"capability-cache.json",
+			"crashes.json",
+			"logs/",
+			"backups/",
+			"archive/",
+			"git/",
+			"npm/",
+			"install/",
+			"engineering-memory/",
+			"orch-*/",
+		];
+	}
+
+	getPathRewriteTargets(): string[] {
+		return [];
+	}
+
+	getSkillsSubdir(): string | null {
+		return null;
+	}
+}
+
 /** All known environments. */
 export const ALL_ENVIRONMENTS: readonly Environment[] = [
 	new ClaudeEnvironment(),
 	new CodexEnvironment(),
 	new OpenCodeEnvironment(),
 	new AntigravityEnvironment(),
+	new PiEnvironment(),
 ];
 
 /** Look up an environment by its id. */

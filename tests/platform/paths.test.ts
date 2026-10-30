@@ -8,6 +8,7 @@ import {
 	getHomeDir,
 	getInstallDir,
 	getOpenCodeConfigDir,
+	getPiConfigDir,
 	getSyncRepoDir,
 	normalizePath,
 } from "../../src/platform/paths.js";
@@ -111,9 +112,7 @@ describe("getOpenCodeConfigDir", () => {
 
 	it("defaults to ~/.config/opencode when XDG_CONFIG_HOME is not set", () => {
 		delete process.env.XDG_CONFIG_HOME;
-		expect(getOpenCodeConfigDir()).toBe(
-			path.join(os.homedir(), ".config", "opencode"),
-		);
+		expect(getOpenCodeConfigDir()).toBe(path.join(os.homedir(), ".config", "opencode"));
 	});
 
 	it("respects XDG_CONFIG_HOME when set", () => {
@@ -182,5 +181,27 @@ describe("getInstallDir", () => {
 		expect(dir).toBeTruthy();
 		// The found directory should contain a package.json
 		expect(dir.length).toBeGreaterThan(0);
+	});
+});
+
+describe("getPiConfigDir", () => {
+	const original = process.env.PI_CODING_AGENT_DIR;
+
+	afterEach(() => {
+		if (original === undefined) {
+			delete process.env.PI_CODING_AGENT_DIR;
+		} else {
+			process.env.PI_CODING_AGENT_DIR = original;
+		}
+	});
+
+	it("defaults to ~/.pi/agent", () => {
+		delete process.env.PI_CODING_AGENT_DIR;
+		expect(getPiConfigDir()).toBe(path.join(os.homedir(), ".pi", "agent"));
+	});
+
+	it("respects PI_CODING_AGENT_DIR when set", () => {
+		process.env.PI_CODING_AGENT_DIR = "/custom/pi";
+		expect(getPiConfigDir()).toBe("/custom/pi");
 	});
 });

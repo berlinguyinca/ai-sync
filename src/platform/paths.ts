@@ -37,6 +37,14 @@ export function getCodexConfigDir(): string {
 }
 
 /**
+ * Returns the path to the Pi coding agent config directory.
+ * Respects PI_CODING_AGENT_DIR if set.
+ */
+export function getPiConfigDir(): string {
+	return process.env.PI_CODING_AGENT_DIR || path.join(getHomeDir(), ".pi", "agent");
+}
+
+/**
  * Returns the path to the Antigravity config directory (~/.antigravity).
  */
 export function getAntigravityConfigDir(): string {

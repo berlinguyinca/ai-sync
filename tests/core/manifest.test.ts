@@ -115,14 +115,24 @@ describe("manifest", () => {
 			expect(isPathAllowed("plugins/install-counts-cache.json")).toBe(false);
 		});
 
+		it("supports directory, basename and glob ignore patterns", () => {
+			const t = ["a/", "b.json"];
+			expect(isPathAllowed("a/x", t, [], ["a/skip/"])).toBe(true);
+			expect(isPathAllowed("a/skip/x", t, [], ["a/skip/"])).toBe(false);
+			expect(isPathAllowed("a/deep/b.json", t, [], ["b.json"])).toBe(false);
+			expect(isPathAllowed("a/x.bak1", t, [], ["*.bak*"])).toBe(false);
+			expect(isPathAllowed("a/x.txt", t, [], ["*.bak*"])).toBe(true);
+			expect(isPathAllowed("a/orch-1/x", t, [], ["orch-*/"])).toBe(true);
+		});
+
 		it("allows files nested under plugin sync directories", () => {
 			expect(isPathAllowed("plugins/marketplaces/some-repo/file.md")).toBe(true);
 		});
 
 		it("allows files under plugins/data/ directory", () => {
-			expect(
-				isPathAllowed("plugins/data/superpowers-claude-plugins-official/state.json"),
-			).toBe(true);
+			expect(isPathAllowed("plugins/data/superpowers-claude-plugins-official/state.json")).toBe(
+				true,
+			);
 		});
 
 		it("rejects unknown directories", () => {

@@ -59,6 +59,33 @@ export function isRepoLevelPathAllowed(relativePath: string): boolean {
 	return false;
 }
 
+function globToRegExp(glob: string): RegExp {
+	const escaped = glob.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[^/]*");
+	return new RegExp(`^${escaped}$`);
+}
+
+/**
+ * Matches a relative path against one ignore pattern.
+ *
+ * - Pattern containing a "/" before its end (e.g. "plugins/x.json") or ending in "/":
+ *   anchored at the config root. A trailing "/" matches the directory and everything
+ *   under it; "*" matches within a single path segment.
+ * - Pattern without "/" (e.g. "auth.json", "*.bak*"): matched against the file
+ *   name at any depth, so secrets nested in a synced directory are still excluded.
+ */
+function matchesIgnorePattern(relativePath: string, pattern: string): boolean {
+	if (pattern.endsWith("/")) {
+		const dirRe = globToRegExp(pattern.slice(0, -1));
+		const segments = pattern.slice(0, -1).split("/").length;
+		const head = relativePath.split("/").slice(0, segments);
+		return relativePath.split("/").length > segments && dirRe.test(head.join("/"));
+	}
+	if (pattern.includes("/")) {
+		return globToRegExp(pattern).test(relativePath);
+	}
+	return globToRegExp(pattern).test(relativePath.slice(relativePath.lastIndexOf("/") + 1));
+}
+
 /**
  * Checks whether a relative path is allowed by the sync manifest.
  *
@@ -80,7 +107,7 @@ export function isPathAllowed(
 
 	// Check ignore patterns first (these always win)
 	for (const pattern of ignores) {
-		if (relativePath === pattern) {
+		if (matchesIgnorePattern(relativePath, pattern)) {
 			return false;
 		}
 	}
