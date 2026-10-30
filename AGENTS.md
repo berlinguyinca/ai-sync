@@ -26,6 +26,12 @@ AI-assisted merge is configured via `tools/merge-config.json` in the sync repo
 (see `docs/merge-config.md`). It is enabled by default; set `"enabled": false`
 to opt out.
 
+Plugin file sync (Claude `plugins/...`) is controlled by `tools/sync-config.json`
+(`{"plugins": false}` disables it; see `docs/sync-config.md`). Any code that builds an
+allowlist must go through `makeAllowlistFn(env, syncConfig)` / `makeDefaultAllowlistFn(syncConfig)`
+(or `getEffectivePluginPatterns`) with the config from `loadSyncConfig(syncRepoDir)`; never read
+`env.getPluginSyncPatterns()` directly.
+
 ## Architecture
 
 - `src/cli/` — Commander.js CLI entry point and commands
@@ -37,6 +43,7 @@ to opt out.
 - `tests/` — Mirrors src/ structure, uses Vitest + memfs
 - `skills/` — Slash command definitions (`.AGENTS.md` / `.opencode.md`)
 - `tools/merge-config.json` (in the sync repo, not this repo) — AI-merge config; schema in `src/core/merge/config.ts`
+- `tools/sync-config.json` (in the sync repo) — sync options (`plugins`); schema in `src/core/sync-config.ts`
 
 ## Conventions
 

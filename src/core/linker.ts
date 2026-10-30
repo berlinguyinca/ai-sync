@@ -1,6 +1,8 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import { type AllowlistOptions, getEffectivePluginPatterns } from "./env-helpers.js";
 import type { Environment } from "./environment.js";
+import { loadSyncConfig } from "./sync-config.js";
 
 /**
  * Result of a link or unlink operation for one environment.
@@ -16,7 +18,7 @@ export interface LinkResult {
  * Returns the list of sync targets that can be symlinked (no path rewriting needed).
  * Targets that require {{HOME}} path rewriting must stay as copies.
  */
-export function getLinkableTargets(env: Environment): string[] {
+export function getLinkableTargets(env: Environment, options: AllowlistOptions = {}): string[] {
 	const rewriteTargets = new Set(env.getPathRewriteTargets());
 	const linkable: string[] = [];
 
@@ -33,7 +35,7 @@ export function getLinkableTargets(env: Environment): string[] {
 	}
 
 	// Plugin patterns: only include directories (files like installed_plugins.json need rewriting)
-	for (const pattern of env.getPluginSyncPatterns()) {
+	for (const pattern of getEffectivePluginPatterns(env, options)) {
 		if (pattern.endsWith("/")) {
 			linkable.push(pattern);
 			continue;
@@ -49,11 +51,11 @@ export function getLinkableTargets(env: Environment): string[] {
 /**
  * Returns sync targets that cannot be symlinked because they need path rewriting.
  */
-export function getUnlinkableTargets(env: Environment): string[] {
+export function getUnlinkableTargets(env: Environment, options: AllowlistOptions = {}): string[] {
 	const rewriteTargets = new Set(env.getPathRewriteTargets());
 	const unlinkable: string[] = [];
 
-	for (const target of [...env.getSyncTargets(), ...env.getPluginSyncPatterns()]) {
+	for (const target of [...env.getSyncTargets(), ...getEffectivePluginPatterns(env, options)]) {
 		if (target.endsWith("/")) continue;
 		if (rewriteTargets.has(target) || rewriteTargets.has(path.basename(target))) {
 			unlinkable.push(target);
@@ -80,8 +82,9 @@ export async function linkEnvironment(
 ): Promise<LinkResult> {
 	const configDir = env.getConfigDir();
 	const repoSubdir = path.join(syncRepoDir, env.id);
-	const linkable = getLinkableTargets(env);
-	const skipped = getUnlinkableTargets(env);
+	const syncConfig = await loadSyncConfig(syncRepoDir);
+	const linkable = getLinkableTargets(env, syncConfig);
+	const skipped = getUnlinkableTargets(env, syncConfig);
 	const linked: string[] = [];
 	const backedUp: string[] = [];
 
@@ -167,7 +170,7 @@ export async function unlinkEnvironment(
 ): Promise<LinkResult> {
 	const configDir = env.getConfigDir();
 	const repoSubdir = path.join(syncRepoDir, env.id);
-	const linkable = getLinkableTargets(env);
+	const linkable = getLinkableTargets(env); // all targets: also undoes links made before plugins were disabled
 	const unlinked: string[] = [];
 
 	for (const target of linkable) {

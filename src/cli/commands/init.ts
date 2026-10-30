@@ -3,10 +3,15 @@ import * as path from "node:path";
 import type { Command } from "commander";
 import pc from "picocolors";
 import { getEnabledEnvironmentInstances } from "../../core/env-config.js";
-import { makeAllowlistFn, needsPathRewrite } from "../../core/env-helpers.js";
+import {
+	makeAllowlistFn,
+	makeDefaultAllowlistFn,
+	needsPathRewrite,
+} from "../../core/env-helpers.js";
 import { rewritePathsForRepo } from "../../core/path-rewriter.js";
 import { scanDirectory } from "../../core/scanner.js";
 import { installSkills } from "../../core/skills.js";
+import { loadSyncConfig } from "../../core/sync-config.js";
 import {
 	addFiles,
 	commitFiles,
@@ -66,6 +71,7 @@ export async function handleInit(options: InitOptions): Promise<InitResult> {
 	await addFiles(syncRepoDir, [".gitattributes"]);
 	await commitFiles(syncRepoDir, "chore: initialize sync repo with line ending config");
 
+	const syncConfig = await loadSyncConfig(syncRepoDir);
 	let totalCopied = 0;
 	let totalExcluded = 0;
 
@@ -81,7 +87,7 @@ export async function handleInit(options: InitOptions): Promise<InitResult> {
 				continue;
 			}
 
-			const allowlistFn = makeAllowlistFn(env);
+			const allowlistFn = makeAllowlistFn(env, syncConfig);
 			const allowedFiles = await scanDirectory(configDir, allowlistFn);
 			const homeDir = path.dirname(configDir);
 			const envSubdir = path.join(syncRepoDir, env.id);
@@ -138,7 +144,7 @@ export async function handleInit(options: InitOptions): Promise<InitResult> {
 			throw new Error(`No ~/.claude directory found at ${claudeDir}`);
 		}
 
-		const allowedFiles = await scanDirectory(claudeDir);
+		const allowedFiles = await scanDirectory(claudeDir, makeDefaultAllowlistFn(syncConfig));
 		const copiedFiles: string[] = [];
 		for (const relativePath of allowedFiles) {
 			const sourcePath = path.join(claudeDir, relativePath);

@@ -35,6 +35,7 @@ to opt out.
 - `tests/` — Mirrors src/ structure, uses Vitest + memfs
 - `skills/` — Slash command definitions (`.claude.md` / `.opencode.md`)
 - `tools/merge-config.json` (in the sync repo, not this repo) — AI-merge config; schema in `src/core/merge/config.ts`
+- `tools/sync-config.json` (in the sync repo) — sync options (`plugins`); schema in `src/core/sync-config.ts`; allowlists must use `makeAllowlistFn(env, syncConfig)` / `makeDefaultAllowlistFn(syncConfig)`, never `env.getPluginSyncPatterns()` directly (see `docs/sync-config.md`)
 
 ## Conventions
 

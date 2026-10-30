@@ -6,13 +6,18 @@ import pc from "picocolors";
 import { simpleGit } from "simple-git";
 import { createBackup } from "../../core/backup.js";
 import { getEnabledEnvironmentInstances } from "../../core/env-config.js";
-import { makeAllowlistFn, needsPathRewrite } from "../../core/env-helpers.js";
+import {
+	makeAllowlistFn,
+	makeDefaultAllowlistFn,
+	needsPathRewrite,
+} from "../../core/env-helpers.js";
 import { detectRepoVersion } from "../../core/migration.js";
 import { expandPathsForLocal } from "../../core/path-rewriter.js";
 import type { ProvisionResult } from "../../core/provisioner.js";
 import { preflightCheck, provision } from "../../core/provisioner.js";
 import { scanDirectory } from "../../core/scanner.js";
 import { installSkills } from "../../core/skills.js";
+import { loadSyncConfig } from "../../core/sync-config.js";
 import { ToolManifestSchema } from "../../core/tool-manifest.js";
 import { isGitRepo } from "../../git/repo.js";
 import { getClaudeDir, getSyncRepoDir } from "../../platform/paths.js";
@@ -120,6 +125,7 @@ export async function handleBootstrap(options: BootstrapOptions): Promise<Bootst
 		throw new Error(`Clone failed: check your repository URL and authentication. Details: ${msg}`);
 	}
 
+	const syncConfig = await loadSyncConfig(syncRepoDir);
 	log("Detecting repo version...");
 	const version = await detectRepoVersion(syncRepoDir);
 	log(`Repo version: v${version}`);
@@ -133,7 +139,7 @@ export async function handleBootstrap(options: BootstrapOptions): Promise<Bootst
 			const configDir = env.id === "claude" ? claudeDir : env.getConfigDir();
 			const envHomeDir = path.dirname(configDir);
 			const repoSubdir = path.join(syncRepoDir, env.id);
-			const allowlistFn = makeAllowlistFn(env);
+			const allowlistFn = makeAllowlistFn(env, syncConfig);
 
 			// Create config dir if needed
 			await fs.mkdir(configDir, { recursive: true });
@@ -195,17 +201,21 @@ export async function handleBootstrap(options: BootstrapOptions): Promise<Bootst
 
 		// Backup existing config
 		try {
-			const existingFiles = await scanDirectory(claudeDir);
+			const existingFiles = await scanDirectory(claudeDir, makeDefaultAllowlistFn(syncConfig));
 			if (existingFiles.length > 0) {
 				const backupBaseDir = path.join(path.dirname(syncRepoDir), ".ai-sync-backups");
-				backupDir = await createBackup(claudeDir, backupBaseDir);
+				backupDir = await createBackup(
+					claudeDir,
+					backupBaseDir,
+					makeDefaultAllowlistFn(syncConfig),
+				);
 			}
 		} catch {
 			// No existing files
 		}
 
 		// Apply repo files
-		const repoFiles = await scanDirectory(syncRepoDir);
+		const repoFiles = await scanDirectory(syncRepoDir, makeDefaultAllowlistFn(syncConfig));
 		for (const relativePath of repoFiles) {
 			const srcPath = path.join(syncRepoDir, relativePath);
 			const destPath = path.join(claudeDir, relativePath);
