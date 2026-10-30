@@ -608,6 +608,20 @@ describe("core/sync-engine", () => {
 			expect(content).toBe("# Force remote");
 			expect(result.conflicts).toBeUndefined();
 		});
+
+		it("--force restores local drift even when the remote has not changed", async () => {
+			const { claudeDir, options } = await createTestEnv(tmpDir);
+
+			// Repo and local agree after the push; the remote never changes again.
+			await syncPush(options);
+			await fs.writeFile(path.join(claudeDir, "CLAUDE.md"), "# Drifted locally");
+
+			const result = await syncPull({ ...options, force: true });
+
+			const content = await fs.readFile(path.join(claudeDir, "CLAUDE.md"), "utf-8");
+			expect(content).not.toBe("# Drifted locally");
+			expect(result.conflicts).toBeUndefined();
+		});
 	});
 
 	describe("syncStatus", () => {
@@ -1328,6 +1342,19 @@ describe("core/sync-engine", () => {
 
 			const content = await fs.readFile(path.join(claudeConfigDir, "CLAUDE.md"), "utf-8");
 			expect(content).toBe("# Force Remote V2");
+			expect(result.conflicts).toBeUndefined();
+		});
+
+		it("--force restores local drift in v2 even when the remote has not changed", async () => {
+			const { claudeConfigDir, options } = await createV2TestEnv(tmpDir);
+
+			await syncPush(options);
+			await fs.writeFile(path.join(claudeConfigDir, "CLAUDE.md"), "# Drifted locally v2");
+
+			const result = await syncPull({ ...options, force: true });
+
+			const content = await fs.readFile(path.join(claudeConfigDir, "CLAUDE.md"), "utf-8");
+			expect(content).not.toBe("# Drifted locally v2");
 			expect(result.conflicts).toBeUndefined();
 		});
 

@@ -757,11 +757,12 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 									type: "modified",
 								});
 							}
-						} else if (!remoteChanged) {
+						} else if (!remoteChanged && !options.force) {
 							// Only local changes — keep local version
 							verboseLog(options, `Keeping local changes: ${relativePath}`);
 						} else if (options.force) {
-							// Both changed + --force — overwrite with remote
+							// Local drifted + --force — overwrite with remote, whether or not
+							// the remote changed since the last pull
 							if (!options.dryRun) {
 								await fs.mkdir(path.dirname(destPath), { recursive: true });
 								await writeFilePreservingMode(srcPath, destPath, remoteContent);
@@ -981,7 +982,7 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 						await writeFilePreservingMode(srcPath, destPath, remoteContent);
 						allFileChanges.push({ path: relativePath, type: "modified" });
 					}
-				} else if (!remoteChanged) {
+				} else if (!remoteChanged && !options.force) {
 					verboseLog(options, `Keeping local changes: ${relativePath}`);
 				} else if (options.force) {
 					await fs.mkdir(path.dirname(destPath), { recursive: true });
