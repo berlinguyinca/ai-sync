@@ -153,6 +153,60 @@ describe("claude verifier", () => {
 		]);
 	});
 
+	const MERGE_IT =
+		"---\ndescription: Ship the current changes end-to-end: branch, PR, review, fix, merge. Use when …\nargument-hint: [x]\n---\nbody\n";
+	const LENIENT_WARNING =
+		'frontmatter is not strict YAML (unquoted ": " in value); tolerated by Claude Code — quote the value to be portable';
+
+	it("tolerates unquoted ': ' in command frontmatter as a warning", async () => {
+		await validTree();
+		await write("commands/gw/merge-it.md", MERGE_IT);
+		const r = await verify();
+		expect(r.errors).toEqual([]);
+		expect(r.ok).toBe(true);
+		expect(r.warnings).toEqual([{ path: "commands/gw/merge-it.md", problem: LENIENT_WARNING }]);
+	});
+
+	it("tolerates unquoted ': ' in skill and agent frontmatter as a warning", async () => {
+		await validTree();
+		await write("skills/alpha/SKILL.md", skill("alpha", "Do it: fast. Use when asked"));
+		await write(
+			"agents/reviewer.md",
+			"---\nname: reviewer\ndescription: reviews: all\nmodel: opus\n---\n",
+		);
+		const r = await verify();
+		expect(r.errors).toEqual([]);
+		expect(r.ok).toBe(true);
+		expect(r.warnings.map((w) => w.path).sort()).toEqual([
+			"agents/reviewer.md",
+			"skills/alpha/SKILL.md",
+		]);
+	});
+
+	it("keeps the error when lenient parsing cannot recover required keys", async () => {
+		await validTree();
+		await write("skills/alpha/SKILL.md", "---\nname: alpha\nnote: a: b\n---\n");
+		const r = await verify();
+		expect(r.errors).toEqual([
+			{ path: "skills/alpha/SKILL.md", problem: "frontmatter is not valid YAML" },
+		]);
+	});
+
+	it("still errors on garbage and unterminated frontmatter", async () => {
+		await validTree();
+		await write("commands/tab.md", "---\ndescription: a: b\n\tgarbage\n---\n");
+		await write("commands/junk.md", "---\ndescription: a: b\nnot a key line\n---\n");
+		await write("commands/open.md", "---\ndescription: a: b\nbody never closed\n");
+		const r = await verify();
+		expect(r.ok).toBe(false);
+		expect(r.errors.map((e) => e.path).sort()).toEqual([
+			"commands/junk.md",
+			"commands/open.md",
+			"commands/tab.md",
+		]);
+		expect(r.warnings).toEqual([]);
+	});
+
 	it("flags bad settings.json", async () => {
 		await validTree();
 		await write("settings.json", "{ nope");

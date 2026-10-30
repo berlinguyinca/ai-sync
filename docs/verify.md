@@ -24,6 +24,14 @@ All paths are relative to the Claude config dir (`~/.claude`).
   `model` (if present) is `sonnet`, `opus`, `haiku`, `fable`, `inherit` or
   matches `claude-[a-z0-9.-]+`.
 - `commands/**/*.md`: frontmatter, if present, parses.
+- Frontmatter that is not strict YAML only because of an unquoted `: ` inside
+  a value (for example `description: Ship it: branch, PR`) is accepted with a
+  warning, because Claude Code loads such files. A lenient line parser (top-level
+  `key: value` lines, value taken verbatim) must recover the required keys
+  (`name` and a non-empty `description` for skills and agents; none for
+  commands) and every line must be a key line, comment, `- ` item or
+  space-indented continuation; unterminated frontmatter and other garbage
+  remain errors. Warnings never fail the run. Quote the value to silence it.
 - `settings.json`: valid JSON. Every hook `command` and `statusLine.command`
   is scanned for script paths starting with `$HOME/`, `${HOME}/`, `~/`,
   `{{HOME}}/`, the current home directory or

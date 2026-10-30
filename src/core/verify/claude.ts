@@ -4,7 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { promisify } from "node:util";
 import type { Environment } from "../environment.js";
-import { parseFrontmatter } from "./frontmatter.js";
+import { LENIENT_WARNING, parseFrontmatter } from "./frontmatter.js";
 import { exists, isBrokenSymlink, listDir, rel, walk } from "./fs-utils.js";
 import { IssueCollector, type Verifier, type VerifyOptions, type VerifyResult } from "./types.js";
 
@@ -131,9 +131,10 @@ export const claudeVerifier: Verifier = {
 			checked.skills++;
 			const text = await readText(file);
 			if (text === null) return issues.error(r(file), "cannot read SKILL.md");
-			const fm = parseFrontmatter(text);
+			const fm = parseFrontmatter(text, ["name", "description"]);
 			if (fm.kind === "none") return issues.error(r(file), "missing frontmatter");
 			if (fm.kind === "invalid") return issues.error(r(file), fm.problem);
+			if (fm.lenient) issues.warn(r(file), LENIENT_WARNING);
 			if (!isNonEmptyString(fm.data.name)) issues.error(r(file), "missing name");
 			else if (fm.data.name !== path.basename(dir)) {
 				issues.error(r(file), "name does not match directory name");
@@ -165,7 +166,7 @@ export const claudeVerifier: Verifier = {
 			const text = await readText(file);
 			if (text === null) continue; // unreadable or broken symlink (already reported)
 			checked.agents++;
-			const fm = parseFrontmatter(text);
+			const fm = parseFrontmatter(text, ["name", "description"]);
 			if (fm.kind === "none") {
 				issues.error(r(file), "missing frontmatter");
 				continue;
@@ -174,6 +175,7 @@ export const claudeVerifier: Verifier = {
 				issues.error(r(file), fm.problem);
 				continue;
 			}
+			if (fm.lenient) issues.warn(r(file), LENIENT_WARNING);
 			if (!isNonEmptyString(fm.data.name)) issues.error(r(file), "missing name");
 			if (!isNonEmptyString(fm.data.description)) {
 				issues.error(r(file), "missing or empty description");
@@ -198,6 +200,7 @@ export const claudeVerifier: Verifier = {
 			checked.commands++;
 			const fm = parseFrontmatter(text);
 			if (fm.kind === "invalid") issues.error(r(file), fm.problem);
+			else if (fm.kind === "ok" && fm.lenient) issues.warn(r(file), LENIENT_WARNING);
 		}
 
 		// --- settings.json hooks / statusLine ---
