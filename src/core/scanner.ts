@@ -109,6 +109,9 @@ async function scanDir(
 				if (visitedDirs.has(realPath)) {
 					continue;
 				}
+				if (await dirTargetIsIgnored(realPath, rootReal, checkAllowed.isIgnored)) {
+					continue;
+				}
 				visitedDirs.add(realPath);
 				await scanDir(baseDir, relativePath, checkAllowed, results, visitedDirs, rootReal);
 			}
@@ -136,8 +139,33 @@ async function targetIsIgnored(
 	}
 	if (isIgnored(path.basename(target))) return true;
 	const rel = path.relative(rootReal, target);
-	if (rel && !rel.startsWith("..") && !path.isAbsolute(rel)) {
+	if (isInsideRoot(rel)) {
 		return isIgnored(normalizePath(rel));
+	}
+	return false;
+}
+
+/** True when `rel` (from path.relative) is a non-empty path that stays inside the root. */
+function isInsideRoot(rel: string): boolean {
+	return rel !== "" && rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel);
+}
+
+/**
+ * Checks a symlinked directory's resolved target against the ignore patterns, so a link
+ * such as `extensions/l -> ../logs` cannot smuggle an ignored directory into the sync.
+ * Probes `<dir>/x` so directory patterns (`logs/`) match; checks the target's own basename
+ * and, when inside the config dir, every segment of its root-relative path.
+ */
+async function dirTargetIsIgnored(
+	realPath: string,
+	rootReal: string,
+	isIgnored: ((relativePath: string) => boolean) | undefined,
+): Promise<boolean> {
+	if (!isIgnored) return false;
+	if (isIgnored(`${path.basename(realPath)}/x`)) return true;
+	const rel = path.relative(rootReal, realPath);
+	if (isInsideRoot(rel)) {
+		return isIgnored(`${normalizePath(rel)}/x`);
 	}
 	return false;
 }

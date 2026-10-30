@@ -465,7 +465,7 @@ Use `ai-sync migrate` to move from v1 to v2 format.
 
 `auth.json`, `models.json`, `models-store.json`, `engineering.yaml`, `*.bak*`, `*.pre-*`, `.env*`, `*.json~`, `capability-cache.json`, `crashes.json`, `logs/`, `backups/`, `archive/`, `git/`, `npm/`, `install/`, `engineering-memory/`, `orch-*/`
 
-These are excluded even when they sit inside a synced directory. Patterns match case-insensitively and at any depth: file-name patterns against the file name, single-segment directory patterns (`logs/`, `orch-*/`) against any directory in the path. Symlinks that resolve to an excluded file are skipped. Credentials (`auth.json`, `models.json`) must never reach the sync repo; the rest is local state, caches, or backups that regenerate. Pi does no `{{HOME}}` rewriting, so keep absolute host paths out of `settings.json`.
+These are excluded even when they sit inside a synced directory. Patterns match case-insensitively and at any depth: file-name patterns against the file name, single-segment directory patterns (`logs/`, `orch-*/`) against any directory in the path. Symlinks that resolve to an excluded file, or to an excluded directory (inside or outside the config dir), are skipped; other symlinks are followed. Credentials (`auth.json`, `models.json`) must never reach the sync repo; the rest is local state, caches, or backups that regenerate. Pi does no `{{HOME}}` rewriting, so keep absolute host paths out of `settings.json`.
 
 ### Codex — Excluded (machine-local)
 

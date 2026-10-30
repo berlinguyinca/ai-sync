@@ -3,7 +3,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { makeAllowlistFn } from "../../src/core/env-helpers.js";
-import type { Environment } from "../../src/core/environment.js";
+import { ClaudeEnvironment, type Environment, PiEnvironment } from "../../src/core/environment.js";
 import { scanDirectory } from "../../src/core/scanner.js";
 
 class TestEnv implements Environment {
@@ -232,5 +232,106 @@ describe("scanner symlinks to ignored files", () => {
 		} finally {
 			await fs.rm(outside, { recursive: true, force: true });
 		}
+	});
+	describe("symlinked directories vs ignore patterns", () => {
+		let cfg: string;
+		let outside: string;
+
+		beforeEach(async () => {
+			cfg = path.join(tmpDir, "cfg");
+			outside = path.join(tmpDir, "outside");
+			await fs.mkdir(cfg, { recursive: true });
+			await fs.mkdir(outside, { recursive: true });
+		});
+
+		async function write(rel: string, base = cfg): Promise<void> {
+			const full = path.join(base, rel);
+			await fs.mkdir(path.dirname(full), { recursive: true });
+			await fs.writeFile(full, "x");
+		}
+
+		async function link(target: string, rel: string): Promise<void> {
+			const full = path.join(cfg, rel);
+			await fs.mkdir(path.dirname(full), { recursive: true });
+			await fs.symlink(target, full);
+		}
+
+		it("skips directory symlinks resolving to ignored in-root directories", async () => {
+			await write("logs/a.txt");
+			await write("backups/b.txt");
+			await write("engineering-memory/m.md");
+			await write("extensions/keep.ts");
+			await link(path.join(cfg, "logs"), "extensions/l_logs");
+			await link(path.join(cfg, "backups"), "extensions/l_backups");
+			await link(path.join(cfg, "engineering-memory"), "skills/mem");
+
+			const result = await scanDirectory(cfg, makeAllowlistFn(new PiEnvironment()));
+			expect(result).toEqual(["extensions/keep.ts"]);
+		});
+
+		it("skips directory symlinks nested under an ignored in-root directory", async () => {
+			await write("backups/deep/c.txt");
+			await link(path.join(cfg, "backups", "deep"), "extensions/l_deep");
+
+			const result = await scanDirectory(cfg, makeAllowlistFn(new PiEnvironment()));
+			expect(result).toEqual([]);
+		});
+
+		it("skips directory symlinks whose outside target is named like an ignored dir", async () => {
+			await write("logs/o.txt", outside);
+			await link(path.join(outside, "logs"), "extensions/ext_logs");
+
+			const result = await scanDirectory(cfg, makeAllowlistFn(new PiEnvironment()));
+			expect(result).toEqual([]);
+		});
+
+		it("still follows directory symlinks to non-ignored outside directories (Pi)", async () => {
+			await write("shared/s.ts", outside);
+			await link(path.join(outside, "shared"), "extensions/ext_shared");
+
+			const result = await scanDirectory(cfg, makeAllowlistFn(new PiEnvironment()));
+			expect(result).toEqual(["extensions/ext_shared/s.ts"]);
+		});
+
+		it("does not treat an in-root directory named '..d' as outside the root", async () => {
+			await write("..d/backups/x.txt");
+			await link(path.join(cfg, "..d"), "extensions/l_dotdot");
+
+			const result = await scanDirectory(cfg, makeAllowlistFn(new PiEnvironment()));
+			expect(result).toEqual([]);
+		});
+
+		it("skips file symlinks into an in-root '..d' ignored path", async () => {
+			await write("..d/backups/x.txt");
+			await link(path.join(cfg, "..d", "backups", "x.txt"), "extensions/l_file.txt");
+
+			const result = await scanDirectory(cfg, makeAllowlistFn(new PiEnvironment()));
+			expect(result).toEqual([]);
+		});
+
+		it("is unchanged for Claude: symlinked skills dir outside the root is scanned", async () => {
+			await write("skill-a/SKILL.md", outside);
+			await link(path.join(outside, "skill-a"), "skills/skill-a");
+
+			const result = await scanDirectory(cfg, makeAllowlistFn(new ClaudeEnvironment()));
+			expect(result).toContain("skills/skill-a/SKILL.md");
+		});
+	});
+
+	describe("Pi editor temp files", () => {
+		it("ignores *.swp, *.swo and *.tmp", async () => {
+			const cfg = path.join(tmpDir, "cfg");
+			for (const f of [
+				"extensions/a.ts",
+				"extensions/.a.ts.swp",
+				"extensions/a.swo",
+				"prompts/p.tmp",
+			]) {
+				await fs.mkdir(path.dirname(path.join(cfg, f)), { recursive: true });
+				await fs.writeFile(path.join(cfg, f), "x");
+			}
+			const result = await scanDirectory(cfg, makeAllowlistFn(new PiEnvironment()));
+			expect(result).toEqual(["extensions/a.ts"]);
+		});
 	});
 });
