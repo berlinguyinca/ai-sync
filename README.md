@@ -411,6 +411,19 @@ By default, only Claude Code is enabled. Use `ai-sync env enable codex`, `ai-syn
 
 Use `ai-sync migrate` to move from v1 to v2 format.
 
+## Fabric (optional)
+
+If you run a control plane that tracks your machines, ai-sync can list them and join the shared sync repo. Disabled unless you set `AI_SYNC_FABRIC_URL` (or `tools/fabric.json`); no network calls otherwise.
+
+```bash
+export AI_SYNC_FABRIC_URL=https://fabric.example.com
+export AI_SYNC_FABRIC_TOKEN=...   # optional, sent as X-API-Key, never stored
+ai-sync fabric status [--json]
+ai-sync fabric join [--yes]       # dry run unless --yes
+```
+
+Protocol and details: [docs/fabric.md](docs/fabric.md).
+
 ## What syncs (and what doesn't)
 
 ### Claude Code — Synced (~15MB)
