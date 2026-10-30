@@ -9,9 +9,13 @@ import { z } from "zod";
  * When false, the claude environment's plugin sync patterns are treated as empty
  * in every code path: nothing under `plugins/` is pushed, pulled, backed up,
  * diffed or deleted.
+ *
+ * `verify` defaults to false. When true, `ai-sync pull` runs the read-only
+ * verifier for each pulled environment after applying (see docs/verify.md).
  */
 export const SyncConfigSchema = z.strictObject({
 	plugins: z.boolean().default(true),
+	verify: z.boolean().default(false),
 });
 
 export type SyncConfig = z.infer<typeof SyncConfigSchema>;
@@ -51,7 +55,7 @@ export async function loadSyncConfig(syncRepoDir: string): Promise<SyncConfig> {
 	if (!result.success) {
 		const problems = result.error.issues.map((issue) => {
 			if (issue.code === "unrecognized_keys") {
-				return `unknown key(s) ${issue.keys.map((k) => `"${k}"`).join(", ")} (allowed: "plugins")`;
+				return `unknown key(s) ${issue.keys.map((k) => `"${k}"`).join(", ")} (allowed: "plugins", "verify")`;
 			}
 			return `${issue.path.join(".") || "(root)"}: ${issue.message}`;
 		});

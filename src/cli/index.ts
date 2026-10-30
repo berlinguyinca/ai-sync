@@ -17,6 +17,7 @@ import { registerPushCommand } from "./commands/push.js";
 import { registerResolveCommand } from "./commands/resolve.js";
 import { registerStatusCommand } from "./commands/status.js";
 import { registerUpdateCommand } from "./commands/update.js";
+import { registerVerifyCommand } from "./commands/verify.js";
 
 /** Read version from package.json so it stays in sync automatically. */
 function getVersion(): string {
@@ -56,7 +57,8 @@ program
 			"  ai-sync env list|enable|disable  Manage synced environments\n" +
 			"  ai-sync link                  Symlink config to sync repo (single source of truth)\n" +
 			"  ai-sync unlink                Revert symlinks back to regular files\n" +
-			"  ai-sync migrate               Migrate v1 repo to v2 multi-env format\n\n" +
+			"  ai-sync migrate               Migrate v1 repo to v2 multi-env format\n" +
+			"  ai-sync verify                Check the synced config loads (read-only)\n\n" +
 			"Auto-update: ai-sync checks for updates once every 24 hours.\n" +
 			"Disable with --no-update-check.",
 	)
@@ -76,6 +78,7 @@ registerMigrateCommand(program);
 registerFragmentCommand(program);
 registerResolveCommand(program);
 registerFabricCommand(program);
+registerVerifyCommand(program);
 
 export { program };
 

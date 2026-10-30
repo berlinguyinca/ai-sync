@@ -215,6 +215,19 @@ ai-sync pull -v               # show detailed file changes
 ai-sync pull --auto-apply     # apply AI merges directly instead of staging them
 ```
 
+### `ai-sync verify`
+
+Read-only check that the synced tool configuration actually loads: skill and
+agent frontmatter, `settings.json`, hook scripts, broken symlinks. Exit code
+0 = ok, 1 = errors, 2 = usage or internal failure. Set `"verify": true` in
+`tools/sync-config.json` to run it automatically after `ai-sync pull`. See
+[`docs/verify.md`](docs/verify.md).
+
+```bash
+ai-sync verify                 # all enabled environments
+ai-sync verify --env claude --json
+```
+
 ### `ai-sync status`
 
 Shows local modifications, remote drift, and excluded file count. With

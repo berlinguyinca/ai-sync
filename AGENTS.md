@@ -17,6 +17,7 @@ npm run typecheck      # tsc --noEmit
 
 ```bash
 ai-sync init | push | pull [--auto-apply] | status [--verbose] [--summarize]
+ai-sync verify [--env <id>] [--json]   # read-only config load check; docs/verify.md
 ai-sync bootstrap <repo-url> | update | install-skills | env | migrate
 ai-sync resolve list | diff <path> | accept <path|--all> | reject <path|--all>
 ai-sync fabric status [--json] | join [--yes]   # optional; off unless AI_SYNC_FABRIC_URL / tools/fabric.json
@@ -38,6 +39,7 @@ allowlist must go through `makeAllowlistFn(env, syncConfig)` / `makeDefaultAllow
 - `src/core/` — Sync engine, manifest (allowlist), path rewriter, backups, environments
 - `src/core/merge/` — AI-assisted 3-way merge (config, adapters, strategies, staging, orchestrator)
 - `src/core/fabric/` — optional fabric client/config (`docs/fabric.md`). Must stay inert unless configured: nothing outside `src/cli/commands/fabric.ts` and CLI registration may import it; token only from `AI_SYNC_FABRIC_TOKEN`, never logged or stored; no new runtime deps (built-in fetch)
+- `src/core/verify/` — read-only config verifiers (registry keyed by env id; generic JSON fallback). Must never write, and results must never contain file contents or secrets. `verify: true` in sync-config runs it after `pull`
 - `src/git/` — Git wrapper (simple-git)
 - `src/platform/` — Cross-platform path resolution
 - `tests/` — Mirrors src/ structure, uses Vitest + memfs

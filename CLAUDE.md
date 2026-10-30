@@ -17,6 +17,7 @@ npm run typecheck      # tsc --noEmit
 
 ```bash
 ai-sync init | push | pull [--auto-apply] | status [--verbose] [--summarize]
+ai-sync verify [--env <id>] [--json]   # read-only config load check; docs/verify.md
 ai-sync bootstrap <repo-url> | update | install-skills | env | migrate
 ai-sync resolve list | diff <path> | accept <path|--all> | reject <path|--all>
 ```

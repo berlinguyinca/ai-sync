@@ -1,10 +1,12 @@
 import type { Command } from "commander";
 import pc from "picocolors";
 import { getEnabledEnvironmentInstances } from "../../core/env-config.js";
+import { loadSyncConfig } from "../../core/sync-config.js";
 import type { SyncPullResult } from "../../core/sync-engine.js";
 import { syncPull } from "../../core/sync-engine.js";
 import { getClaudeDir, getSyncRepoDir } from "../../platform/paths.js";
 import { printFileChanges, printSkippedLinks } from "../format.js";
+import { printVerifyResult, verifyEnvironments } from "./verify.js";
 
 /**
  * Options for the pull command handler.
@@ -118,6 +120,24 @@ export function registerPullCommand(program: Command): void {
 					}
 					if (!result.dryRun && result.backupDir) {
 						console.log(pc.dim(`Backup saved to: ${result.backupDir}`));
+					}
+					if (!result.dryRun) {
+						const syncConfig = await loadSyncConfig(opts.repoPath ?? getSyncRepoDir());
+						if (syncConfig.verify) {
+							const results = await verifyEnvironments(getEnabledEnvironmentInstances(), opts.env);
+							console.log(pc.cyan("\nVerifying pulled configuration (verify: true):"));
+							for (const r of results) printVerifyResult(r);
+							if (results.some((r) => !r.ok)) {
+								console.error(
+									pc.red(
+										`Verification failed. Nothing was rolled back; restore the pre-pull files from the backup${
+											result.backupDir ? ` at ${result.backupDir}` : ""
+										} if needed.`,
+									),
+								);
+								process.exitCode = 1;
+							}
+						}
 					}
 				} catch (error) {
 					const message = error instanceof Error ? error.message : String(error);
