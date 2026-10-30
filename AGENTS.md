@@ -19,6 +19,7 @@ npm run typecheck      # tsc --noEmit
 ai-sync init | push | pull [--auto-apply] | status [--verbose] [--summarize]
 ai-sync bootstrap <repo-url> | update | install-skills | env | migrate
 ai-sync resolve list | diff <path> | accept <path|--all> | reject <path|--all>
+ai-sync fabric status [--json] | join [--yes]   # optional; off unless AI_SYNC_FABRIC_URL / tools/fabric.json
 ```
 
 AI-assisted merge is configured via `tools/merge-config.json` in the sync repo
@@ -30,6 +31,7 @@ to opt out.
 - `src/cli/` — Commander.js CLI entry point and commands
 - `src/core/` — Sync engine, manifest (allowlist), path rewriter, backups, environments
 - `src/core/merge/` — AI-assisted 3-way merge (config, adapters, strategies, staging, orchestrator)
+- `src/core/fabric/` — optional fabric client/config (`docs/fabric.md`). Must stay inert unless configured: nothing outside `src/cli/commands/fabric.ts` and CLI registration may import it; token only from `AI_SYNC_FABRIC_TOKEN`, never logged or stored; no new runtime deps (built-in fetch)
 - `src/git/` — Git wrapper (simple-git)
 - `src/platform/` — Cross-platform path resolution
 - `tests/` — Mirrors src/ structure, uses Vitest + memfs

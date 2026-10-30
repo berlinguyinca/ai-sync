@@ -6,6 +6,7 @@ import pc from "picocolors";
 import { startupUpdateCheck } from "../core/updater.js";
 import { registerBootstrapCommand } from "./commands/bootstrap.js";
 import { registerEnvCommand } from "./commands/env.js";
+import { registerFabricCommand } from "./commands/fabric.js";
 import { registerFragmentCommand } from "./commands/fragment.js";
 import { registerInitCommand } from "./commands/init.js";
 import { registerInstallSkillsCommand } from "./commands/install-skills.js";
@@ -74,6 +75,7 @@ registerLinkCommand(program);
 registerMigrateCommand(program);
 registerFragmentCommand(program);
 registerResolveCommand(program);
+registerFabricCommand(program);
 
 export { program };
 

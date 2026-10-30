@@ -22,7 +22,8 @@ import { getClaudeDir, getSyncRepoDir } from "../../platform/paths.js";
  * Returns null on success, or an error message string on failure.
  */
 function checkSshConnectivity(repoUrl: string): string | null {
-	// Only check for SSH-style URLs
+	// Only check for SSH-style URLs (ssh:// or user@host:path); https:// needs no ssh probe
+	if (/^[a-z][a-z0-9+.-]*:\/\//i.test(repoUrl) && !repoUrl.startsWith("ssh://")) return null;
 	const sshMatch = repoUrl.match(/^(?:ssh:\/\/)?(?:[^@]+@)?([^:/]+)/);
 	if (!sshMatch && !repoUrl.includes("git@")) return null;
 
@@ -59,6 +60,8 @@ function checkSshConnectivity(repoUrl: string): string | null {
 
 export interface BootstrapOptions {
 	repoUrl: string;
+	/** Optional branch to clone (default: the remote's default branch). */
+	branch?: string;
 	repoPath?: string;
 	claudeDir?: string;
 	force?: boolean;
@@ -107,7 +110,11 @@ export async function handleBootstrap(options: BootstrapOptions): Promise<Bootst
 	// Clone the remote repo
 	log(`Cloning ${options.repoUrl}...`);
 	try {
-		await simpleGit().clone(options.repoUrl, syncRepoDir);
+		await simpleGit().clone(
+			options.repoUrl,
+			syncRepoDir,
+			options.branch ? ["--branch", options.branch] : [],
+		);
 	} catch (error) {
 		const msg = error instanceof Error ? error.message : String(error);
 		throw new Error(`Clone failed: check your repository URL and authentication. Details: ${msg}`);
