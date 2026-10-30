@@ -11,6 +11,7 @@ import { loadMergeConfig } from "../../core/merge/config.js";
 import { buildSummaryPrompt, type SummaryDiffData } from "../../core/merge/prompts.js";
 import { summarizeWithResolver } from "../../core/merge/summarize.js";
 import { verifyTool } from "../../core/provisioner.js";
+import { loadSyncConfig } from "../../core/sync-config.js";
 import type { SyncStatusResult } from "../../core/sync-engine.js";
 import { syncStatus } from "../../core/sync-engine.js";
 import { ToolManifestSchema } from "../../core/tool-manifest.js";
@@ -388,8 +389,12 @@ export function registerStatusCommand(program: Command): void {
 				}
 				console.log(pc.dim(`Excluded: ${result.excludedCount} files (not in sync manifest)`));
 
-				// Tool status from manifest
 				const syncRepoDir = opts.repoPath ?? getSyncRepoDir();
+				if (!(await loadSyncConfig(syncRepoDir)).plugins) {
+					console.log(pc.dim("plugins: not synced (tools/sync-config.json)"));
+				}
+
+				// Tool status from manifest
 				const manifestPath = path.join(syncRepoDir, "tools", "manifest.json");
 				try {
 					const manifestContent = await fs.readFile(manifestPath, "utf-8");

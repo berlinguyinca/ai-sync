@@ -11,7 +11,7 @@ import {
 	pushToRemote,
 } from "../git/repo.js";
 import { createBackup } from "./backup.js";
-import { makeAllowlistFn, needsPathRewrite } from "./env-helpers.js";
+import { makeAllowlistFn, makeDefaultAllowlistFn, needsPathRewrite } from "./env-helpers.js";
 import type { Environment } from "./environment.js";
 import { createAdapter } from "./merge/adapters/index.js";
 import { defaultMergeConfig, loadMergeConfig, type MergeConfig } from "./merge/config.js";
@@ -23,6 +23,7 @@ import { expandPathsForLocal, rewritePathsForRepo } from "./path-rewriter.js";
 import type { ProvisionResult } from "./provisioner.js";
 import { discoverTools, preflightCheck, provision, writeManifest } from "./provisioner.js";
 import { scanDirectory } from "./scanner.js";
+import { loadSyncConfig, type SyncConfig } from "./sync-config.js";
 import { ToolManifestSchema } from "./tool-manifest.js";
 
 /**
@@ -163,6 +164,19 @@ function resolveLegacyPaths(options: SyncOptions): {
 }
 
 /**
+ * Re-reads tools/sync-config.json after a pull. Plugins stay synced only if both
+ * the pre-pull and post-pull configs enable them, so a pull that disables plugin
+ * sync never touches the local plugins/ tree (re-enabling takes effect next pull).
+ */
+async function reloadSyncConfigAfterPull(
+	syncRepoDir: string,
+	before: SyncConfig,
+): Promise<SyncConfig> {
+	const after = await loadSyncConfig(syncRepoDir);
+	return { ...after, plugins: before.plugins && after.plugins };
+}
+
+/**
  * Returns the subdirectory within the sync repo for an environment.
  * v1 repos use the root (empty string), v2 repos use env.id.
  */
@@ -195,6 +209,7 @@ async function syncSharedDirectory(syncRepoDir: string): Promise<string[]> {
  */
 export async function syncPush(options: SyncOptions): Promise<SyncPushResult> {
 	const { syncRepoDir } = options;
+	const syncConfig = await loadSyncConfig(syncRepoDir);
 
 	// Check remote exists
 	verboseLog(options, "Checking remote configuration...");
@@ -246,7 +261,7 @@ export async function syncPush(options: SyncOptions): Promise<SyncPushResult> {
 					continue;
 				}
 
-				const allowlistFn = makeAllowlistFn(env);
+				const allowlistFn = makeAllowlistFn(env, syncConfig);
 				verboseLog(options, `Scanning ${configDir}...`);
 				const skipped: string[] = [];
 				const localFiles = await scanDirectory(configDir, allowlistFn, skipped);
@@ -306,7 +321,7 @@ export async function syncPush(options: SyncOptions): Promise<SyncPushResult> {
 		verboseLog(options, "Using v1 flat mode");
 		const { claudeDir, homeDir } = resolveLegacyPaths(options);
 		verboseLog(options, `Scanning ${claudeDir}...`);
-		const localFiles = await scanDirectory(claudeDir);
+		const localFiles = await scanDirectory(claudeDir, makeDefaultAllowlistFn(syncConfig));
 		verboseLog(options, `Found ${localFiles.length} files`);
 
 		for (const relativePath of localFiles) {
@@ -322,7 +337,7 @@ export async function syncPush(options: SyncOptions): Promise<SyncPushResult> {
 		}
 
 		// Delete files from repo that no longer exist locally
-		const repoFiles = await scanDirectory(syncRepoDir);
+		const repoFiles = await scanDirectory(syncRepoDir, makeDefaultAllowlistFn(syncConfig));
 		const localFileSet = new Set(localFiles);
 		for (const repoFile of repoFiles) {
 			if (!localFileSet.has(repoFile)) {
@@ -527,6 +542,7 @@ async function destEscapesRoot(rootReal: string | null, destPath: string): Promi
  */
 export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 	const { syncRepoDir } = options;
+	let syncConfig = await loadSyncConfig(syncRepoDir);
 
 	// Check remote exists
 	verboseLog(options, "Checking remote configuration...");
@@ -588,7 +604,7 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 		const prePullContents = new Map<string, Map<string, string>>();
 		for (const env of envs) {
 			const repoSubdir = getRepoSubdir(syncRepoDir, env.id, 2);
-			const allowlistFn = makeAllowlistFn(env);
+			const allowlistFn = makeAllowlistFn(env, syncConfig);
 			const contents = new Map<string, string>();
 			try {
 				const repoFiles = await scanDirectory(repoSubdir, allowlistFn);
@@ -614,7 +630,7 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 				try {
 					await fs.access(configDir);
 					const envBackupDir = path.join(backupDir, env.id);
-					const allowlistFn = makeAllowlistFn(env);
+					const allowlistFn = makeAllowlistFn(env, syncConfig);
 					const existingFiles = await scanDirectory(configDir, allowlistFn);
 					if (existingFiles.length > 0) {
 						await fs.mkdir(envBackupDir, { recursive: true });
@@ -633,6 +649,7 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 			// Pull from remote
 			verboseLog(options, "Pulling from remote...");
 			await pullFromRemote(syncRepoDir);
+			syncConfig = await reloadSyncConfigAfterPull(syncRepoDir, syncConfig);
 		} else {
 			// Dry-run: fetch to see what's available but don't pull
 			verboseLog(options, "Fetching from remote (dry-run)...");
@@ -646,7 +663,7 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 				const configDir = env.getConfigDir();
 				const homeDir = options.homeDir ?? path.dirname(configDir);
 				const repoSubdir = getRepoSubdir(syncRepoDir, env.id, 2);
-				const allowlistFn = makeAllowlistFn(env);
+				const allowlistFn = makeAllowlistFn(env, syncConfig);
 				const envChanges: FileChange[] = [];
 				const envConflicts: FileChange[] = [];
 				const envStaged: StagedEntry[] = [];
@@ -883,7 +900,7 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 		// Snapshot repo state before pull for merge detection
 		const v1PrePull = new Map<string, string>();
 		try {
-			const prePullFiles = await scanDirectory(syncRepoDir);
+			const prePullFiles = await scanDirectory(syncRepoDir, makeDefaultAllowlistFn(syncConfig));
 			for (const f of prePullFiles) {
 				v1PrePull.set(f, await fs.readFile(path.join(syncRepoDir, f), "utf-8"));
 			}
@@ -903,16 +920,21 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 		} catch {
 			// use new path
 		}
-		backupDir = await createBackup(claudeDir, effectiveBackupBase);
+		backupDir = await createBackup(
+			claudeDir,
+			effectiveBackupBase,
+			makeDefaultAllowlistFn(syncConfig),
+		);
 		verboseLog(options, `Backup created at ${backupDir}`);
 
 		// Pull from remote
 		verboseLog(options, "Pulling from remote...");
 		await pullFromRemote(syncRepoDir);
+		syncConfig = await reloadSyncConfigAfterPull(syncRepoDir, syncConfig);
 
 		// Scan repo for files to apply
 		verboseLog(options, "Scanning repo for files to apply...");
-		const repoFiles = await scanDirectory(syncRepoDir);
+		const repoFiles = await scanDirectory(syncRepoDir, makeDefaultAllowlistFn(syncConfig));
 		verboseLog(options, `Found ${repoFiles.length} files in repo`);
 		const repoFileSet = new Set(repoFiles);
 
@@ -973,7 +995,7 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 		}
 
 		// Remove local files that no longer exist in the repo (propagate deletions)
-		const localFiles = await scanDirectory(claudeDir);
+		const localFiles = await scanDirectory(claudeDir, makeDefaultAllowlistFn(syncConfig));
 		for (const localFile of localFiles) {
 			if (!repoFileSet.has(localFile)) {
 				const wasInRepo = v1PrePull.has(localFile);
@@ -1071,6 +1093,7 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
  */
 export async function syncStatus(options: SyncOptions): Promise<SyncStatusResult> {
 	const { syncRepoDir } = options;
+	const syncConfig = await loadSyncConfig(syncRepoDir);
 
 	// Check remote and fetch if available
 	verboseLog(options, "Checking remote configuration...");
@@ -1123,7 +1146,7 @@ export async function syncStatus(options: SyncOptions): Promise<SyncStatusResult
 			const configDir = env.getConfigDir();
 			const homeDir = options.homeDir ?? path.dirname(configDir);
 			const repoSubdir = getRepoSubdir(syncRepoDir, env.id, 2);
-			const allowlistFn = makeAllowlistFn(env);
+			const allowlistFn = makeAllowlistFn(env, syncConfig);
 			const envMods: FileChange[] = [];
 
 			let localFiles: string[] = [];
@@ -1205,9 +1228,9 @@ export async function syncStatus(options: SyncOptions): Promise<SyncStatusResult
 		const { claudeDir, homeDir } = resolveLegacyPaths(options);
 
 		verboseLog(options, `Scanning local: ${claudeDir}`);
-		const localFiles = await scanDirectory(claudeDir);
+		const localFiles = await scanDirectory(claudeDir, makeDefaultAllowlistFn(syncConfig));
 		verboseLog(options, `Scanning repo: ${syncRepoDir}`);
-		const repoFiles = await scanDirectory(syncRepoDir);
+		const repoFiles = await scanDirectory(syncRepoDir, makeDefaultAllowlistFn(syncConfig));
 		verboseLog(options, `${localFiles.length} local files, ${repoFiles.length} repo files`);
 
 		const localFileSet = new Set(localFiles);

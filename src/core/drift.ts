@@ -7,6 +7,7 @@ import { listStaged } from "./merge/staging.js";
 import { detectRepoVersion } from "./migration.js";
 import { rewritePathsForRepo } from "./path-rewriter.js";
 import { scanDirectory } from "./scanner.js";
+import { loadSyncConfig } from "./sync-config.js";
 
 /**
  * Per-environment drift classification.
@@ -71,7 +72,8 @@ export async function classifyDriftForEnv(
 	homeDir: string,
 ): Promise<DriftReport> {
 	const configDir = env.getConfigDir();
-	const allowlistFn = makeAllowlistFn(env);
+	const syncConfig = await loadSyncConfig(syncRepoDir);
+	const allowlistFn = makeAllowlistFn(env, syncConfig);
 	const version = await detectRepoVersion(syncRepoDir);
 	const repoSubdir = version === 1 ? syncRepoDir : path.join(syncRepoDir, env.id);
 	const repoSubdirRel = version === 1 ? "" : env.id;

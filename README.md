@@ -351,6 +351,12 @@ To disable AI-merge entirely, write:
 
 See [`docs/merge-config.md`](docs/merge-config.md) for the full schema reference.
 
+### Configuration: `tools/sync-config.json`
+
+Claude Code plugin files (`plugins/cache`, `plugins/marketplaces`, ...) are synced by default.
+To stop syncing them, put `{ "plugins": false }` in `tools/sync-config.json` in your sync repo.
+Pull then never touches the local `plugins/` directory. See [`docs/sync-config.md`](docs/sync-config.md).
+
 ### Reviewing pending merges
 
 ```bash
