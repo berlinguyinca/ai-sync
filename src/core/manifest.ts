@@ -59,11 +59,71 @@ export function isRepoLevelPathAllowed(relativePath: string): boolean {
 	return false;
 }
 
+const globCache = new Map<string, RegExp>();
+
+function globToRegExp(glob: string): RegExp {
+	let re = globCache.get(glob);
+	if (!re) {
+		const escaped = glob.replace(/[.+^${}()|[\]\\?]/g, "\\$&").replace(/\*/g, "[^/]*");
+		re = new RegExp(`^${escaped}$`, "i");
+		globCache.set(glob, re);
+	}
+	return re;
+}
+
+/**
+ * Matches a relative path against one ignore pattern (case-insensitive).
+ *
+ * - Pattern starting with "/" (e.g. "/git/", "/x.json"): anchored at the config root;
+ *   the rest of the pattern is matched from the root only, never at depth.
+ * - Pattern ending in "/" with no other "/" (e.g. "logs/", "orch-*\/"): matches a
+ *   directory segment at any depth, and everything under it.
+ * - Pattern ending in "/" with an inner "/" (e.g. "plugins/cache/"): anchored at the
+ *   config root; matches the directory and everything under it.
+ * - Pattern containing a "/" elsewhere (e.g. "plugins/x.json"): anchored at the config root.
+ * - Pattern without "/" (e.g. "auth.json", "*.bak*"): matched against every path
+ *   segment, so a file or a directory of that name (and everything below it) is
+ *   excluded at any depth.
+ *
+ * "*" matches within a single path segment.
+ */
+function matchesIgnorePattern(relativePath: string, rawPattern: string): boolean {
+	const parts = relativePath.split("/");
+	const anchored = rawPattern.startsWith("/");
+	const pattern = anchored ? rawPattern.slice(1) : rawPattern;
+	if (pattern.endsWith("/")) {
+		const dir = pattern.slice(0, -1);
+		const dirRe = globToRegExp(dir);
+		if (!anchored && !dir.includes("/")) {
+			// Any directory segment (not the final file name) may match.
+			return parts.slice(0, -1).some((segment) => dirRe.test(segment));
+		}
+		const segments = dir.split("/").length;
+		return parts.length > segments && dirRe.test(parts.slice(0, segments).join("/"));
+	}
+	if (anchored || pattern.includes("/")) {
+		return globToRegExp(pattern).test(relativePath);
+	}
+	const re = globToRegExp(pattern);
+	return parts.some((segment) => re.test(segment));
+}
+
+/**
+ * Checks whether a relative path matches any of the ignore patterns.
+ * Unlike isPathAllowed, this ignores the allowlist: it only answers "is this excluded?".
+ */
+export function isPathIgnored(relativePath: string, ignorePatterns: readonly string[]): boolean {
+	return ignorePatterns.some((pattern) => matchesIgnorePattern(relativePath, pattern));
+}
+
 /**
  * Checks whether a relative path is allowed by the sync manifest.
  *
  * Allowlist behavior: only known paths are included, everything else is rejected.
- * Ignore patterns take priority over sync patterns.
+ * Ignore patterns take priority over sync patterns. Ignore patterns are globs
+ * ("*" within one segment), matched case-insensitively and segment-wise (see
+ * matchesIgnorePattern; a leading "/" anchors at the config root). This is a
+ * behaviour change for custom callers that previously passed plain prefixes/names.
  *
  * Accepts optional custom lists for environment-specific allowlists.
  * Falls back to the defaults (Claude Code targets) when not provided.
@@ -79,10 +139,8 @@ export function isPathAllowed(
 	const ignores = ignorePatterns ?? PLUGIN_IGNORE_PATTERNS;
 
 	// Check ignore patterns first (these always win)
-	for (const pattern of ignores) {
-		if (relativePath === pattern) {
-			return false;
-		}
+	if (isPathIgnored(relativePath, ignores)) {
+		return false;
 	}
 
 	// Check sync targets

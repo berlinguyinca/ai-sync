@@ -89,6 +89,8 @@ export interface SyncPushResult {
 	errors?: Record<string, string>;
 	/** True when --dry-run was used. */
 	dryRun?: boolean;
+	/** Symlinks skipped because they resolve outside the config dir ("<env>: <path>"). */
+	skippedLinks?: string[];
 }
 
 /**
@@ -118,6 +120,8 @@ export interface SyncPullResult {
 	dryRun?: boolean;
 	/** Result of tool provisioning, if manifest was found during pull. */
 	provisioning?: ProvisionResult;
+	/** Symlinks skipped because they resolve outside the config dir ("<env>: <path>"). */
+	skippedLinks?: string[];
 }
 
 /**
@@ -219,6 +223,7 @@ export async function syncPush(options: SyncOptions): Promise<SyncPushResult> {
 	verboseLog(options, `Repo version: v${version}`);
 	const perEnvironment: Record<string, { filesUpdated: number; fileChanges: FileChange[] }> = {};
 	const errors: Record<string, string> = {};
+	const skippedLinks: string[] = [];
 	const envs = options.filterEnv
 		? (options.environments ?? []).filter((e) => e.id === options.filterEnv)
 		: (options.environments ?? []);
@@ -243,15 +248,23 @@ export async function syncPush(options: SyncOptions): Promise<SyncPushResult> {
 
 				const allowlistFn = makeAllowlistFn(env);
 				verboseLog(options, `Scanning ${configDir}...`);
-				const localFiles = await scanDirectory(configDir, allowlistFn);
+				const skipped: string[] = [];
+				const localFiles = await scanDirectory(configDir, allowlistFn, skipped);
+				for (const s of skipped) skippedLinks.push(`${env.id}: ${s}`);
 				verboseLog(options, `Found ${localFiles.length} files for ${env.id}`);
 
 				if (!options.dryRun) {
 					// Copy each file from configDir to repoSubdir
 					await fs.mkdir(repoSubdir, { recursive: true });
+					const guardRepo = allowlistFn.followExternalSymlinks === false;
+					const repoRootReal = guardRepo ? await resolveRootReal(repoSubdir) : "";
 					for (const relativePath of localFiles) {
 						const srcPath = path.join(configDir, relativePath);
 						const destPath = path.join(repoSubdir, relativePath);
+						if (guardRepo && (await destEscapesRoot(repoRootReal, destPath))) {
+							skippedLinks.push(`${env.id}: ${relativePath}`);
+							continue;
+						}
 						await fs.mkdir(path.dirname(destPath), { recursive: true });
 						let content = await fs.readFile(srcPath, "utf-8");
 						if (needsPathRewrite(relativePath, env)) {
@@ -266,9 +279,16 @@ export async function syncPush(options: SyncOptions): Promise<SyncPushResult> {
 						const repoFiles = await scanDirectory(repoSubdir, allowlistFn);
 						const localFileSet = new Set(localFiles);
 						for (const repoFile of repoFiles) {
-							if (!localFileSet.has(repoFile)) {
-								await fs.rm(path.join(repoSubdir, repoFile));
+							if (localFileSet.has(repoFile)) continue;
+							// Never prune what a skipped external link hides locally.
+							if (skipped.some((sk) => repoFile === sk || repoFile.startsWith(`${sk}/`))) continue;
+							if (
+								guardRepo &&
+								(await destEscapesRoot(repoRootReal, path.join(repoSubdir, repoFile)))
+							) {
+								continue;
 							}
+							await fs.rm(path.join(repoSubdir, repoFile));
 						}
 					} catch {
 						// Subdir might not exist yet
@@ -328,6 +348,7 @@ export async function syncPush(options: SyncOptions): Promise<SyncPushResult> {
 				fileChanges: [],
 				perEnvironment: Object.keys(perEnvironment).length > 0 ? perEnvironment : undefined,
 				errors: errorsResult,
+				skippedLinks: skippedLinks.length > 0 ? skippedLinks : undefined,
 				dryRun: options.dryRun,
 			};
 		}
@@ -338,6 +359,7 @@ export async function syncPush(options: SyncOptions): Promise<SyncPushResult> {
 			fileChanges: [],
 			perEnvironment: Object.keys(perEnvironment).length > 0 ? perEnvironment : undefined,
 			errors: errorsResult,
+			skippedLinks: skippedLinks.length > 0 ? skippedLinks : undefined,
 			dryRun: options.dryRun,
 		};
 	}
@@ -379,6 +401,7 @@ export async function syncPush(options: SyncOptions): Promise<SyncPushResult> {
 			fileChanges,
 			perEnvironment: Object.keys(perEnvironment).length > 0 ? perEnvironment : undefined,
 			errors: errorsResult,
+			skippedLinks: skippedLinks.length > 0 ? skippedLinks : undefined,
 			dryRun: true,
 		};
 	}
@@ -445,7 +468,58 @@ export async function syncPush(options: SyncOptions): Promise<SyncPushResult> {
 		fileChanges,
 		perEnvironment: Object.keys(perEnvironment).length > 0 ? perEnvironment : undefined,
 		errors: errorsResult,
+		skippedLinks: skippedLinks.length > 0 ? skippedLinks : undefined,
 	};
+}
+
+/**
+ * Resolves a config root once per environment per run. Returns "" when the root does not
+ * exist (nothing can escape it) and null when it cannot be inspected (EACCES etc.),
+ * which makes destEscapesRoot fail closed.
+ */
+async function resolveRootReal(configDir: string): Promise<string | null> {
+	try {
+		return await fs.realpath(configDir);
+	} catch (err) {
+		return isNotFound(err) ? "" : null;
+	}
+}
+
+function isNotFound(err: unknown): boolean {
+	const code = (err as NodeJS.ErrnoException).code;
+	return code === "ENOENT" || code === "ENOTDIR";
+}
+
+/**
+ * True when `destPath` (or its deepest existing ancestor) resolves outside the root
+ * (as returned by resolveRootReal), or is a dangling symlink, so a write/remove there
+ * would go through a link. Fails closed (true) on errors other than "does not exist".
+ */
+async function destEscapesRoot(rootReal: string | null, destPath: string): Promise<boolean> {
+	if (rootReal === null) return true;
+	if (rootReal === "") return false;
+	let current = destPath;
+	for (;;) {
+		try {
+			const real = await fs.realpath(current);
+			const rel = path.relative(rootReal, real);
+			return !(
+				rel === "" ||
+				(rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel))
+			);
+		} catch (err) {
+			if (!isNotFound(err)) return true;
+			try {
+				if ((await fs.lstat(current)).isSymbolicLink()) return true;
+			} catch (lerr) {
+				if (!isNotFound(lerr)) return true;
+				// does not exist; check the parent
+			}
+		}
+		const parent = path.dirname(current);
+		if (parent === current) return false;
+		current = parent;
+	}
 }
 
 /**
@@ -501,6 +575,7 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 			mergeConfig = { ...mergeConfig, enabled: false };
 		}
 	}
+	const skippedLinks: string[] = [];
 	const errors: Record<string, string> = {};
 	const envs = options.filterEnv
 		? (options.environments ?? []).filter((e) => e.id === options.filterEnv)
@@ -580,7 +655,9 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 				let repoFiles: string[] = [];
 				try {
 					await fs.access(repoSubdir);
-					repoFiles = await scanDirectory(repoSubdir, allowlistFn);
+					const skipped: string[] = [];
+					repoFiles = await scanDirectory(repoSubdir, allowlistFn, skipped);
+					for (const s of skipped) skippedLinks.push(`${env.id}: ${s}`);
 				} catch {
 					// No files for this environment in repo
 					perEnvironment[env.id] = { filesApplied: 0, fileChanges: [] };
@@ -594,10 +671,18 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 				}
 
 				const repoFileSet = new Set(repoFiles);
+				const configRootReal = await resolveRootReal(configDir);
 
 				for (const relativePath of repoFiles) {
 					const srcPath = path.join(repoSubdir, relativePath);
 					const destPath = path.join(configDir, relativePath);
+					if (
+						!allowlistFn.followExternalSymlinks &&
+						(await destEscapesRoot(configRootReal, destPath))
+					) {
+						skippedLinks.push(`${env.id}: ${relativePath}`);
+						continue;
+					}
 					const rewrite = needsPathRewrite(relativePath, env);
 					let remoteContent = await fs.readFile(srcPath, "utf-8");
 					if (rewrite) {
@@ -727,6 +812,13 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 								const wasInRepo = prePull.has(localFile);
 								if (!wasInRepo) {
 									// Never in repo — local-only file, leave it alone
+									continue;
+								}
+								if (
+									!allowlistFn.followExternalSymlinks &&
+									(await destEscapesRoot(configRootReal, path.join(configDir, localFile)))
+								) {
+									skippedLinks.push(`${env.id}: ${localFile}`);
 									continue;
 								}
 								// Remote deleted this file — check for local modifications
@@ -968,6 +1060,7 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 		staged: allStaged.length > 0 ? allStaged : undefined,
 		perEnvironment: Object.keys(perEnvironment).length > 0 ? perEnvironment : undefined,
 		errors: hasErrors ? errors : undefined,
+		skippedLinks: skippedLinks.length > 0 ? skippedLinks : undefined,
 		dryRun: options.dryRun,
 		provisioning: provisioningResult,
 	};

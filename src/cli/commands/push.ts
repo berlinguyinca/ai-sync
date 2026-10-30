@@ -4,7 +4,7 @@ import { getEnabledEnvironmentInstances } from "../../core/env-config.js";
 import type { SyncPushResult } from "../../core/sync-engine.js";
 import { syncPush } from "../../core/sync-engine.js";
 import { getClaudeDir, getSyncRepoDir } from "../../platform/paths.js";
-import { printFileChanges } from "../format.js";
+import { printFileChanges, printSkippedLinks } from "../format.js";
 
 /**
  * Options for the push command handler.
@@ -55,7 +55,10 @@ export function registerPushCommand(program: Command): void {
 		.option("--claude-dir <path>", "Custom ~/.claude path", getClaudeDir())
 		.option("-v, --verbose", "Show detailed file changes", false)
 		.option("-n, --dry-run", "Show what would be pushed without making changes", false)
-		.option("--env <id>", "Only push a specific environment (e.g., claude or opencode)")
+		.option(
+			"--env <id>",
+			"Only push a specific environment (claude, codex, opencode, antigravity or pi)",
+		)
 		.option("--skip-discovery", "Skip tool discovery", false)
 		.action(
 			async (opts: {
@@ -72,6 +75,7 @@ export function registerPushCommand(program: Command): void {
 						console.error(pc.red("Errors during push:"));
 						printErrors(result.errors);
 					}
+					printSkippedLinks(result.skippedLinks);
 					if (result.dryRun) {
 						if (opts.verbose && result.fileChanges.length > 0) {
 							printFileChanges(result.fileChanges);

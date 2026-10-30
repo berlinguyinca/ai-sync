@@ -16,6 +16,7 @@ export {
 	CodexEnvironment,
 	getEnvironmentById,
 	OpenCodeEnvironment,
+	PiEnvironment,
 } from "./core/environment.js";
 export {
 	DEFAULT_SYNC_TARGETS,
@@ -63,6 +64,7 @@ export {
 	getHomeDir,
 	getInstallDir,
 	getOpenCodeConfigDir,
+	getPiConfigDir,
 	getSyncRepoDir,
 	normalizePath,
 } from "./platform/paths.js";

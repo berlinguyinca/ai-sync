@@ -248,8 +248,8 @@ describe("environment", () => {
 			expect(ids).toContain("antigravity");
 		});
 
-		it("has exactly 4 environments", () => {
-			expect(ALL_ENVIRONMENTS).toHaveLength(4);
+		it("has exactly 5 environments", () => {
+			expect(ALL_ENVIRONMENTS).toHaveLength(5);
 		});
 	});
 

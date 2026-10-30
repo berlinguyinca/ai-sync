@@ -1,6 +1,6 @@
 import * as os from "node:os";
 import * as path from "node:path";
-import { getCodexConfigDir } from "../platform/paths.js";
+import { getCodexConfigDir, getPiConfigDir } from "../platform/paths.js";
 
 /**
  * Represents an AI tool environment (e.g., Claude Code, OpenCode) whose
@@ -23,6 +23,11 @@ export interface Environment {
 	getPathRewriteTargets(): string[];
 	/** Subdirectory name for slash-command skills, or null if not supported. */
 	getSkillsSubdir(): string | null;
+	/**
+	 * Whether symlinks resolving outside the config dir are followed during scans.
+	 * Treated as true when absent.
+	 */
+	followExternalSymlinks?(): boolean;
 }
 
 /**
@@ -204,12 +209,87 @@ export class AntigravityEnvironment implements Environment {
 	}
 }
 
+/**
+ * Pi coding agent environment — config lives at PI_CODING_AGENT_DIR or ~/.pi/agent.
+ *
+ * Only portable, credential-free entries are synced. The ignore patterns are a
+ * second line of defence so secrets and machine state never sync even when they
+ * sit inside an otherwise-synced directory.
+ */
+export class PiEnvironment implements Environment {
+	readonly id = "pi";
+	readonly displayName = "Pi";
+
+	getConfigDir(): string {
+		return getPiConfigDir();
+	}
+
+	getSyncTargets(): readonly string[] {
+		return [
+			"extensions/",
+			"engineering-panel/",
+			"bin/",
+			"prompts/",
+			"skills/",
+			"AGENTS.md",
+			"settings.json",
+		];
+	}
+
+	getPluginSyncPatterns(): readonly string[] {
+		return [];
+	}
+
+	getIgnorePatterns(): readonly string[] {
+		return [
+			"auth.json",
+			"models.json",
+			"models-store.json",
+			"engineering.yaml",
+			"*.bak*",
+			"*.pre-*",
+			".env*",
+			"*.json~",
+			"*.swp",
+			"*.swo",
+			"*.tmp",
+			"capability-cache.json",
+			"crashes.json",
+			"node_modules/",
+			".venv/",
+			"__pycache__/",
+			"logs/",
+			"backups/",
+			"/archive/",
+			"/git/",
+			"/npm/",
+			"/install/",
+			"engineering-memory/",
+			"orch-*/",
+		];
+	}
+
+	getPathRewriteTargets(): string[] {
+		return [];
+	}
+
+	getSkillsSubdir(): string | null {
+		return null;
+	}
+
+	/** A tampered link must never pull files from outside the config dir into a sync. */
+	followExternalSymlinks(): boolean {
+		return false;
+	}
+}
+
 /** All known environments. */
 export const ALL_ENVIRONMENTS: readonly Environment[] = [
 	new ClaudeEnvironment(),
 	new CodexEnvironment(),
 	new OpenCodeEnvironment(),
 	new AntigravityEnvironment(),
+	new PiEnvironment(),
 ];
 
 /** Look up an environment by its id. */

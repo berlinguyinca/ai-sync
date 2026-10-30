@@ -23,3 +23,12 @@ export function printFileChanges(changes: FileChange[]): void {
 		console.log(`  ${changeTypeIndicator(change.type)} ${change.path}`);
 	}
 }
+
+/**
+ * Prints one line per symlink skipped because it resolves outside the config dir.
+ */
+export function printSkippedLinks(skipped: string[] | undefined): void {
+	for (const link of skipped ?? []) {
+		console.log(pc.yellow(`  skipped symlink outside config dir: ${link}`));
+	}
+}

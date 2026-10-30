@@ -2,7 +2,7 @@
 
 Git-backed sync for AI tool configuration across macOS, Linux, and Windows/WSL.
 
-Keeps your skills, commands, hooks, settings, and tool config identical on every machine. Supports **Claude Code** (`~/.claude`), **Codex** (`~/.codex` or `$CODEX_HOME`), and **OpenCode** (`~/.config/opencode/`).
+Keeps your skills, commands, hooks, settings, and tool config identical on every machine. Supports **Claude Code** (`~/.claude`), **Codex** (`~/.codex` or `$CODEX_HOME`), **OpenCode** (`~/.config/opencode/`), and **Pi** (`~/.pi/agent` or `$PI_CODING_AGENT_DIR`).
 
 ## Why
 
@@ -375,8 +375,9 @@ ai-sync supports multiple AI tool environments:
 | Claude Code | `~/.claude` | `commands/` | `settings.json` |
 | Codex | `~/.codex` or `$CODEX_HOME` | n/a | `config.toml` |
 | OpenCode | `~/.config/opencode/` | `command/` | `opencode.json` |
+| Pi | `~/.pi/agent` or `$PI_CODING_AGENT_DIR` | n/a | none |
 
-By default, only Claude Code is enabled. Use `ai-sync env enable codex` or `ai-sync env enable opencode` to add more environments.
+By default, only Claude Code is enabled. Use `ai-sync env enable codex`, `ai-sync env enable opencode`, or `ai-sync env enable pi` to add more environments.
 
 ### Repo structure
 
@@ -447,6 +448,24 @@ Use `ai-sync migrate` to move from v1 to v2 format.
 |------|-----------|
 | `config.toml` | Main Codex configuration (paths auto-rewritten) |
 | `automations/` | Saved recurring tasks and automation definitions |
+
+### Pi — Synced
+
+| Path | What it is |
+|------|-----------|
+| `extensions/` | Pi extensions |
+| `engineering-panel/` | Engineering panel code |
+| `bin/` | Helper scripts |
+| `prompts/` | Prompt templates |
+| `skills/` | Skills |
+| `AGENTS.md` | Global instructions |
+| `settings.json` | Settings (no path rewriting) |
+
+### Pi — Excluded (secrets and machine state)
+
+`auth.json`, `models.json`, `models-store.json`, `engineering.yaml`, `*.bak*`, `*.pre-*`, `.env*`, `*.json~`, `capability-cache.json`, `crashes.json`, `node_modules/`, `.venv/`, `__pycache__/`, `logs/`, `backups/`, `/archive/`, `/git/`, `/npm/`, `/install/`, `engineering-memory/`, `orch-*/`
+
+These are excluded even when they sit inside a synced directory. A leading `/` anchors a pattern at the config root (`/git/` excludes only the root `git/` and below, so `skills/foo/git/` and `skills/foo/install/` still sync; the generic names `archive`, `git`, `npm`, `install` are anchored for that reason). Patterns are globs (`*` within one path segment) and match case-insensitively and at any depth: file-name patterns against the file name, single-segment directory patterns (`logs/`, `orch-*/`) against any directory in the path. Symlinks that resolve to an excluded file, or to an excluded directory (inside or outside the config dir), are skipped. For Pi, symlinks (file or directory) whose resolved target is outside the config dir are also skipped, so a tampered sync repo or local link can never pull outside files (e.g. `~/.ssh/id_rsa`) into a sync; `push`/`pull` print one `skipped symlink outside config dir` line per link. In-root symlinks are followed (subject to the ignore checks). Other environments follow external symlinks as before. `push` deletes repo files whose local copy was removed, but keeps repo files under a path that is currently skipped because it is an external symlink (e.g. `extensions -> ~/dotfiles/pi-ext`), and never writes through a link inside the repo subdir. **Behaviour change for custom callers of `isPathAllowed`/`isPathIgnored`:** ignore patterns are now globs, case-insensitive and matched segment-wise (not plain prefixes). Credentials (`auth.json`, `models.json`) must never reach the sync repo; the rest is local state, caches, or backups that regenerate. Pi does no `{{HOME}}` rewriting, so keep absolute host paths out of `settings.json`.
 
 ### Codex — Excluded (machine-local)
 
@@ -543,7 +562,7 @@ src/
 │   ├── sync-engine.ts        # Push/pull/status orchestration
 │   ├── updater.ts            # Auto-update mechanism
 │   ├── skills.ts             # Skill installation (/sync command)
-│   ├── environment.ts        # Environment definitions (Claude, OpenCode)
+│   ├── environment.ts        # Environment definitions (Claude, Codex, OpenCode, Antigravity, Pi)
 │   ├── env-config.ts         # Per-machine environment preferences
 │   ├── env-helpers.ts        # Shared helpers (allowlist, path rewrite checks)
 │   ├── migration.ts          # v1→v2 repo migration
