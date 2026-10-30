@@ -460,6 +460,39 @@ export async function syncPush(options: SyncOptions): Promise<SyncPushResult> {
 }
 
 /**
+ * True when `destPath` (or its deepest existing ancestor) resolves outside `configDir`,
+ * or is a dangling symlink, so a write/remove there would go through a local link.
+ */
+async function destEscapesRoot(configDir: string, destPath: string): Promise<boolean> {
+	let rootReal: string;
+	try {
+		rootReal = await fs.realpath(configDir);
+	} catch {
+		return false;
+	}
+	let current = destPath;
+	for (;;) {
+		try {
+			const real = await fs.realpath(current);
+			const rel = path.relative(rootReal, real);
+			return !(
+				rel === "" ||
+				(rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel))
+			);
+		} catch {
+			try {
+				if ((await fs.lstat(current)).isSymbolicLink()) return true;
+			} catch {
+				// does not exist; check the parent
+			}
+		}
+		const parent = path.dirname(current);
+		if (parent === current) return false;
+		current = parent;
+	}
+}
+
+/**
  * Pulls remote changes into local config directories.
  */
 export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
@@ -612,6 +645,10 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 				for (const relativePath of repoFiles) {
 					const srcPath = path.join(repoSubdir, relativePath);
 					const destPath = path.join(configDir, relativePath);
+					if (!allowlistFn.followExternalSymlinks && (await destEscapesRoot(configDir, destPath))) {
+						skippedLinks.push(`${env.id}: ${relativePath}`);
+						continue;
+					}
 					const rewrite = needsPathRewrite(relativePath, env);
 					let remoteContent = await fs.readFile(srcPath, "utf-8");
 					if (rewrite) {
@@ -741,6 +778,13 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 								const wasInRepo = prePull.has(localFile);
 								if (!wasInRepo) {
 									// Never in repo — local-only file, leave it alone
+									continue;
+								}
+								if (
+									!allowlistFn.followExternalSymlinks &&
+									(await destEscapesRoot(configDir, path.join(configDir, localFile)))
+								) {
+									skippedLinks.push(`${env.id}: ${localFile}`);
 									continue;
 								}
 								// Remote deleted this file — check for local modifications

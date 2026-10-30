@@ -72,8 +72,9 @@ function globToRegExp(glob: string): RegExp {
  * - Pattern ending in "/" with an inner "/" (e.g. "plugins/cache/"): anchored at the
  *   config root; matches the directory and everything under it.
  * - Pattern containing a "/" elsewhere (e.g. "plugins/x.json"): anchored at the config root.
- * - Pattern without "/" (e.g. "auth.json", "*.bak*"): matched against the file
- *   name at any depth, so secrets nested in a synced directory are still excluded.
+ * - Pattern without "/" (e.g. "auth.json", "*.bak*"): matched against every path
+ *   segment, so a file or a directory of that name (and everything below it) is
+ *   excluded at any depth.
  *
  * "*" matches within a single path segment.
  */
@@ -92,7 +93,8 @@ function matchesIgnorePattern(relativePath: string, pattern: string): boolean {
 	if (pattern.includes("/")) {
 		return globToRegExp(pattern).test(relativePath);
 	}
-	return globToRegExp(pattern).test(parts[parts.length - 1] ?? "");
+	const re = globToRegExp(pattern);
+	return parts.some((segment) => re.test(segment));
 }
 
 /**
