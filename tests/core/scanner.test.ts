@@ -125,7 +125,7 @@ describe("scanner", () => {
 		expect(result).toContain("keybindings.json");
 	});
 
-	it("follows symlinked files", async () => {
+	it.skipIf(process.platform === "win32")("follows symlinked files", async () => {
 		await createFile("CLAUDE.md", "# Real file");
 		// Create a symlink to an allowed file
 		await fs.symlink(path.join(tmpDir, "CLAUDE.md"), path.join(tmpDir, "settings.json"));
@@ -136,7 +136,7 @@ describe("scanner", () => {
 		expect(result).toContain("settings.json");
 	});
 
-	it("follows symlinked directories", async () => {
+	it.skipIf(process.platform === "win32")("follows symlinked directories", async () => {
 		// Create an external directory with files
 		const externalDir = path.join(tmpDir, "_external");
 		await fs.mkdir(externalDir, { recursive: true });
@@ -150,7 +150,7 @@ describe("scanner", () => {
 		expect(result).toContain("commands/gw/skill.md");
 	});
 
-	it("prevents cycles from circular symlinks", async () => {
+	it.skipIf(process.platform === "win32")("prevents cycles from circular symlinks", async () => {
 		// Create a directory with a symlink back to parent
 		await createFile("commands/real.md", "# Real");
 		await fs.symlink(tmpDir, path.join(tmpDir, "commands", "loop"));
@@ -189,50 +189,62 @@ describe("scanner symlinks to ignored files", () => {
 	const ignores = ["auth.json", "models.json", "logs/"];
 	const allow = () => makeAllowlistFn(new TestEnv(targets, ignores));
 
-	it("skips a symlink pointing at an ignored file inside the config dir", async () => {
-		await fs.mkdir(path.join(tmpDir, "extensions"), { recursive: true });
-		await fs.writeFile(path.join(tmpDir, "auth.json"), '{"k":"secret"}');
-		await fs.writeFile(path.join(tmpDir, "extensions", "ok.ts"), "export {}");
-		await fs.symlink("../auth.json", path.join(tmpDir, "extensions", "creds"));
-
-		const result = await scanDirectory(tmpDir, allow());
-		expect(result).toEqual(["extensions/ok.ts"]);
-	});
-
-	it("skips a symlink pointing at an ignored file outside the config dir", async () => {
-		const outside = await fs.mkdtemp(path.join(os.tmpdir(), "ai-sync-outside-"));
-		try {
-			await fs.writeFile(path.join(outside, "models.json"), "secret");
+	it.skipIf(process.platform === "win32")(
+		"skips a symlink pointing at an ignored file inside the config dir",
+		async () => {
 			await fs.mkdir(path.join(tmpDir, "extensions"), { recursive: true });
-			await fs.symlink(path.join(outside, "models.json"), path.join(tmpDir, "extensions", "m"));
+			await fs.writeFile(path.join(tmpDir, "auth.json"), '{"k":"secret"}');
+			await fs.writeFile(path.join(tmpDir, "extensions", "ok.ts"), "export {}");
+			await fs.symlink("../auth.json", path.join(tmpDir, "extensions", "creds"));
+
+			const result = await scanDirectory(tmpDir, allow());
+			expect(result).toEqual(["extensions/ok.ts"]);
+		},
+	);
+
+	it.skipIf(process.platform === "win32")(
+		"skips a symlink pointing at an ignored file outside the config dir",
+		async () => {
+			const outside = await fs.mkdtemp(path.join(os.tmpdir(), "ai-sync-outside-"));
+			try {
+				await fs.writeFile(path.join(outside, "models.json"), "secret");
+				await fs.mkdir(path.join(tmpDir, "extensions"), { recursive: true });
+				await fs.symlink(path.join(outside, "models.json"), path.join(tmpDir, "extensions", "m"));
+
+				expect(await scanDirectory(tmpDir, allow())).toEqual([]);
+			} finally {
+				await fs.rm(outside, { recursive: true, force: true });
+			}
+		},
+	);
+
+	it.skipIf(process.platform === "win32")(
+		"skips a symlink to a file inside an ignored directory of the config dir",
+		async () => {
+			await fs.mkdir(path.join(tmpDir, "logs"), { recursive: true });
+			await fs.mkdir(path.join(tmpDir, "extensions"), { recursive: true });
+			await fs.writeFile(path.join(tmpDir, "logs", "a.log"), "log");
+			await fs.symlink("../logs/a.log", path.join(tmpDir, "extensions", "l"));
 
 			expect(await scanDirectory(tmpDir, allow())).toEqual([]);
-		} finally {
-			await fs.rm(outside, { recursive: true, force: true });
-		}
-	});
+		},
+	);
 
-	it("skips a symlink to a file inside an ignored directory of the config dir", async () => {
-		await fs.mkdir(path.join(tmpDir, "logs"), { recursive: true });
-		await fs.mkdir(path.join(tmpDir, "extensions"), { recursive: true });
-		await fs.writeFile(path.join(tmpDir, "logs", "a.log"), "log");
-		await fs.symlink("../logs/a.log", path.join(tmpDir, "extensions", "l"));
+	it.skipIf(process.platform === "win32")(
+		"still syncs a symlink to a non-ignored external file",
+		async () => {
+			const outside = await fs.mkdtemp(path.join(os.tmpdir(), "ai-sync-outside-"));
+			try {
+				await fs.writeFile(path.join(outside, "helper.ts"), "export {}");
+				await fs.mkdir(path.join(tmpDir, "extensions"), { recursive: true });
+				await fs.symlink(path.join(outside, "helper.ts"), path.join(tmpDir, "extensions", "h.ts"));
 
-		expect(await scanDirectory(tmpDir, allow())).toEqual([]);
-	});
-
-	it("still syncs a symlink to a non-ignored external file", async () => {
-		const outside = await fs.mkdtemp(path.join(os.tmpdir(), "ai-sync-outside-"));
-		try {
-			await fs.writeFile(path.join(outside, "helper.ts"), "export {}");
-			await fs.mkdir(path.join(tmpDir, "extensions"), { recursive: true });
-			await fs.symlink(path.join(outside, "helper.ts"), path.join(tmpDir, "extensions", "h.ts"));
-
-			expect(await scanDirectory(tmpDir, allow())).toEqual(["extensions/h.ts"]);
-		} finally {
-			await fs.rm(outside, { recursive: true, force: true });
-		}
-	});
+				expect(await scanDirectory(tmpDir, allow())).toEqual(["extensions/h.ts"]);
+			} finally {
+				await fs.rm(outside, { recursive: true, force: true });
+			}
+		},
+	);
 	describe("symlinked directories vs ignore patterns", () => {
 		let cfg: string;
 		let outside: string;
@@ -256,101 +268,131 @@ describe("scanner symlinks to ignored files", () => {
 			await fs.symlink(target, full);
 		}
 
-		it("skips directory symlinks resolving to ignored in-root directories", async () => {
-			await write("logs/a.txt");
-			await write("backups/b.txt");
-			await write("engineering-memory/m.md");
-			await write("extensions/keep.ts");
-			await link(path.join(cfg, "logs"), "extensions/l_logs");
-			await link(path.join(cfg, "backups"), "extensions/l_backups");
-			await link(path.join(cfg, "engineering-memory"), "skills/mem");
+		it.skipIf(process.platform === "win32")(
+			"skips directory symlinks resolving to ignored in-root directories",
+			async () => {
+				await write("logs/a.txt");
+				await write("backups/b.txt");
+				await write("engineering-memory/m.md");
+				await write("extensions/keep.ts");
+				await link(path.join(cfg, "logs"), "extensions/l_logs");
+				await link(path.join(cfg, "backups"), "extensions/l_backups");
+				await link(path.join(cfg, "engineering-memory"), "skills/mem");
 
-			const result = await scanDirectory(cfg, makeAllowlistFn(new PiEnvironment()));
-			expect(result).toEqual(["extensions/keep.ts"]);
-		});
+				const result = await scanDirectory(cfg, makeAllowlistFn(new PiEnvironment()));
+				expect(result).toEqual(["extensions/keep.ts"]);
+			},
+		);
 
-		it("skips directory symlinks nested under an ignored in-root directory", async () => {
-			await write("backups/deep/c.txt");
-			await link(path.join(cfg, "backups", "deep"), "extensions/l_deep");
+		it.skipIf(process.platform === "win32")(
+			"skips directory symlinks nested under an ignored in-root directory",
+			async () => {
+				await write("backups/deep/c.txt");
+				await link(path.join(cfg, "backups", "deep"), "extensions/l_deep");
 
-			const result = await scanDirectory(cfg, makeAllowlistFn(new PiEnvironment()));
-			expect(result).toEqual([]);
-		});
+				const result = await scanDirectory(cfg, makeAllowlistFn(new PiEnvironment()));
+				expect(result).toEqual([]);
+			},
+		);
 
-		it("skips directory symlinks whose outside target is named like an ignored dir", async () => {
-			await write("logs/o.txt", outside);
-			await link(path.join(outside, "logs"), "extensions/ext_logs");
+		it.skipIf(process.platform === "win32")(
+			"skips directory symlinks whose outside target is named like an ignored dir",
+			async () => {
+				await write("logs/o.txt", outside);
+				await link(path.join(outside, "logs"), "extensions/ext_logs");
 
-			const result = await scanDirectory(cfg, makeAllowlistFn(new PiEnvironment()));
-			expect(result).toEqual([]);
-		});
+				const result = await scanDirectory(cfg, makeAllowlistFn(new PiEnvironment()));
+				expect(result).toEqual([]);
+			},
+		);
 
-		it("skips directory symlinks to non-ignored outside directories (Pi)", async () => {
-			await write("shared/s.ts", outside);
-			await link(path.join(outside, "shared"), "extensions/ext_shared");
+		it.skipIf(process.platform === "win32")(
+			"skips directory symlinks to non-ignored outside directories (Pi)",
+			async () => {
+				await write("shared/s.ts", outside);
+				await link(path.join(outside, "shared"), "extensions/ext_shared");
 
-			const result = await scanDirectory(cfg, makeAllowlistFn(new PiEnvironment()));
-			expect(result).toEqual([]);
-		});
+				const result = await scanDirectory(cfg, makeAllowlistFn(new PiEnvironment()));
+				expect(result).toEqual([]);
+			},
+		);
 
-		it("does not treat an in-root directory named '..d' as outside the root", async () => {
-			await write("..d/backups/x.txt");
-			await link(path.join(cfg, "..d"), "extensions/l_dotdot");
+		it.skipIf(process.platform === "win32")(
+			"does not treat an in-root directory named '..d' as outside the root",
+			async () => {
+				await write("..d/backups/x.txt");
+				await link(path.join(cfg, "..d"), "extensions/l_dotdot");
 
-			const result = await scanDirectory(cfg, makeAllowlistFn(new PiEnvironment()));
-			expect(result).toEqual([]);
-		});
+				const result = await scanDirectory(cfg, makeAllowlistFn(new PiEnvironment()));
+				expect(result).toEqual([]);
+			},
+		);
 
-		it("skips file symlinks into an in-root '..d' ignored path", async () => {
-			await write("..d/backups/x.txt");
-			await link(path.join(cfg, "..d", "backups", "x.txt"), "extensions/l_file.txt");
+		it.skipIf(process.platform === "win32")(
+			"skips file symlinks into an in-root '..d' ignored path",
+			async () => {
+				await write("..d/backups/x.txt");
+				await link(path.join(cfg, "..d", "backups", "x.txt"), "extensions/l_file.txt");
 
-			const result = await scanDirectory(cfg, makeAllowlistFn(new PiEnvironment()));
-			expect(result).toEqual([]);
-		});
+				const result = await scanDirectory(cfg, makeAllowlistFn(new PiEnvironment()));
+				expect(result).toEqual([]);
+			},
+		);
 
-		it("is unchanged for Claude: symlinked skills dir outside the root is scanned", async () => {
-			await write("skill-a/SKILL.md", outside);
-			await link(path.join(outside, "skill-a"), "skills/skill-a");
+		it.skipIf(process.platform === "win32")(
+			"is unchanged for Claude: symlinked skills dir outside the root is scanned",
+			async () => {
+				await write("skill-a/SKILL.md", outside);
+				await link(path.join(outside, "skill-a"), "skills/skill-a");
 
-			const result = await scanDirectory(cfg, makeAllowlistFn(new ClaudeEnvironment()));
-			expect(result).toContain("skills/skill-a/SKILL.md");
-		});
+				const result = await scanDirectory(cfg, makeAllowlistFn(new ClaudeEnvironment()));
+				expect(result).toContain("skills/skill-a/SKILL.md");
+			},
+		);
 
-		it("Pi skips file and directory symlinks resolving outside the root and reports them", async () => {
-			await write("id_rsa", outside);
-			await write("helpers/h.ts", outside);
-			await write("extensions/ok.ts");
-			await write("extensions/real/in.ts");
-			await link(path.join(outside, "id_rsa"), "extensions/key.ts");
-			await link(path.join(outside, "helpers"), "extensions/ext");
-			await link(path.join(cfg, "extensions", "real"), "extensions/inroot");
-			await link(path.join(outside, "id_rsa"), "sessions-link");
+		it.skipIf(process.platform === "win32")(
+			"Pi skips file and directory symlinks resolving outside the root and reports them",
+			async () => {
+				await write("id_rsa", outside);
+				await write("helpers/h.ts", outside);
+				await write("extensions/ok.ts");
+				await write("extensions/real/in.ts");
+				await link(path.join(outside, "id_rsa"), "extensions/key.ts");
+				await link(path.join(outside, "helpers"), "extensions/ext");
+				await link(path.join(cfg, "extensions", "real"), "extensions/inroot");
+				await link(path.join(outside, "id_rsa"), "sessions-link");
 
-			const skipped: string[] = [];
-			const result = await scanDirectory(cfg, makeAllowlistFn(new PiEnvironment()), skipped);
-			expect(result).toEqual([
-				"extensions/inroot/in.ts",
-				"extensions/ok.ts",
-				"extensions/real/in.ts",
-			]);
-			expect(skipped.sort()).toEqual(["extensions/ext", "extensions/key.ts"]);
-		});
+				const skipped: string[] = [];
+				const result = await scanDirectory(cfg, makeAllowlistFn(new PiEnvironment()), skipped);
+				expect(result).toEqual([
+					"extensions/inroot/in.ts",
+					"extensions/ok.ts",
+					"extensions/real/in.ts",
+				]);
+				expect(skipped.sort()).toEqual(["extensions/ext", "extensions/key.ts"]);
+			},
+		);
 
-		it("Pi still skips in-root links to ignored files", async () => {
-			await write("auth.json");
-			await link(path.join(cfg, "auth.json"), "extensions/a.ts");
-			expect(await scanDirectory(cfg, makeAllowlistFn(new PiEnvironment()))).toEqual([]);
-		});
+		it.skipIf(process.platform === "win32")(
+			"Pi still skips in-root links to ignored files",
+			async () => {
+				await write("auth.json");
+				await link(path.join(cfg, "auth.json"), "extensions/a.ts");
+				expect(await scanDirectory(cfg, makeAllowlistFn(new PiEnvironment()))).toEqual([]);
+			},
+		);
 
-		it("Claude still follows an outside file symlink and reports nothing skipped", async () => {
-			await write("x.md", outside);
-			await link(path.join(outside, "x.md"), "CLAUDE.md");
-			const skipped: string[] = [];
-			const result = await scanDirectory(cfg, makeAllowlistFn(new ClaudeEnvironment()), skipped);
-			expect(result).toContain("CLAUDE.md");
-			expect(skipped).toEqual([]);
-		});
+		it.skipIf(process.platform === "win32")(
+			"Claude still follows an outside file symlink and reports nothing skipped",
+			async () => {
+				await write("x.md", outside);
+				await link(path.join(outside, "x.md"), "CLAUDE.md");
+				const skipped: string[] = [];
+				const result = await scanDirectory(cfg, makeAllowlistFn(new ClaudeEnvironment()), skipped);
+				expect(result).toContain("CLAUDE.md");
+				expect(skipped).toEqual([]);
+			},
+		);
 	});
 
 	describe("Pi editor temp files", () => {

@@ -89,11 +89,16 @@ describe("PiEnvironment", () => {
 			"extensions/x/logs/a.log",
 			"engineering-panel/orch-1/a",
 			"engineering-panel/engineering-memory/a",
-			"extensions/x/git/a",
+			"git/a",
+			"git/x/b",
 			"extensions/x/backups/a",
-			"extensions/x/archive/a",
-			"extensions/x/npm/a",
-			"extensions/x/install/a",
+			"archive/a",
+			"npm/a",
+			"extensions/x/node_modules/a",
+			"extensions/x/.venv/bin/python",
+			"skills/x/__pycache__/a.pyc",
+			"skills/x/Node_Modules/a",
+			"install/x",
 			"extensions/x/orch-abc/sub/b",
 			"skills/.env/key",
 			"skills/x.bak/secret",
@@ -102,6 +107,16 @@ describe("PiEnvironment", () => {
 			"extensions/foo.swp/a",
 		])("never allows %s", (p) => {
 			expect(allowed(p)).toBe(false);
+		});
+
+		it("allows generic dir names nested (only the root ones are anchored)", () => {
+			expect(allowed("skills/foo/install/setup.sh")).toBe(true);
+			expect(allowed("extensions/x/git/a")).toBe(true);
+			expect(allowed("extensions/x/npm/a")).toBe(true);
+			expect(allowed("extensions/x/archive/a")).toBe(true);
+			const ignored = makeAllowlistFn(pi).isIgnored;
+			expect(ignored("install/x")).toBe(true);
+			expect(ignored("skills/foo/install/setup.sh")).toBe(false);
 		});
 
 		it("does not over-block unrelated names", () => {
@@ -123,23 +138,26 @@ describe("PiEnvironment", () => {
 			await fs.rm(tmpDir, { recursive: true, force: true });
 		});
 
-		it("does not scan through links to a .env directory or a file inside it", async () => {
-			await fs.mkdir(path.join(tmpDir, "skills", ".env"), { recursive: true });
-			await fs.writeFile(path.join(tmpDir, "skills", ".env", "key"), "SECRET");
-			await fs.mkdir(path.join(tmpDir, "skills", "ok"), { recursive: true });
-			await fs.writeFile(path.join(tmpDir, "skills", "ok", "SKILL.md"), "ok");
-			await fs.mkdir(path.join(tmpDir, "extensions"), { recursive: true });
-			await fs.symlink(
-				path.join(tmpDir, "skills", ".env"),
-				path.join(tmpDir, "extensions", "envlink"),
-			);
-			await fs.symlink(
-				path.join(tmpDir, "skills", ".env", "key"),
-				path.join(tmpDir, "extensions", "envkey"),
-			);
-			const files = await scanDirectory(tmpDir, makeAllowlistFn(pi));
-			expect(files).toEqual(["skills/ok/SKILL.md"]);
-		});
+		it.skipIf(process.platform === "win32")(
+			"does not scan through links to a .env directory or a file inside it",
+			async () => {
+				await fs.mkdir(path.join(tmpDir, "skills", ".env"), { recursive: true });
+				await fs.writeFile(path.join(tmpDir, "skills", ".env", "key"), "SECRET");
+				await fs.mkdir(path.join(tmpDir, "skills", "ok"), { recursive: true });
+				await fs.writeFile(path.join(tmpDir, "skills", "ok", "SKILL.md"), "ok");
+				await fs.mkdir(path.join(tmpDir, "extensions"), { recursive: true });
+				await fs.symlink(
+					path.join(tmpDir, "skills", ".env"),
+					path.join(tmpDir, "extensions", "envlink"),
+				);
+				await fs.symlink(
+					path.join(tmpDir, "skills", ".env", "key"),
+					path.join(tmpDir, "extensions", "envkey"),
+				);
+				const files = await scanDirectory(tmpDir, makeAllowlistFn(pi));
+				expect(files).toEqual(["skills/ok/SKILL.md"]);
+			},
+		);
 	});
 
 	describe("pull never writes through local links", () => {
@@ -169,6 +187,7 @@ describe("PiEnvironment", () => {
 			await initRepo(otherDir);
 			await simpleGit(otherDir).addConfig("user.email", "t@t.com");
 			await simpleGit(otherDir).addConfig("user.name", "T");
+			await simpleGit(otherDir).addConfig("commit.gpgsign", "false");
 			await addRemote(otherDir, "origin", bareDir);
 			await fs.writeFile(path.join(otherDir, ".sync-version"), "2");
 			await commitAll(otherDir, "initial");
@@ -192,40 +211,46 @@ describe("PiEnvironment", () => {
 			await commitFiles(dir, msg);
 		}
 
-		it("pi: skips and reports files whose parent resolves outside the config dir", async () => {
-			const { syncRepoDir, outside } = await setup("pi");
-			const piDir = path.join(tmpDir, "home", ".pi", "agent");
-			await fs.mkdir(path.join(piDir, "skills"), { recursive: true });
-			await fs.symlink(outside, path.join(piDir, "skills", "outdir"));
-			const prev = process.env.PI_CODING_AGENT_DIR;
-			process.env.PI_CODING_AGENT_DIR = piDir;
-			try {
+		it.skipIf(process.platform === "win32")(
+			"pi: skips and reports files whose parent resolves outside the config dir",
+			async () => {
+				const { syncRepoDir, outside } = await setup("pi");
+				const piDir = path.join(tmpDir, "home", ".pi", "agent");
+				await fs.mkdir(path.join(piDir, "skills"), { recursive: true });
+				await fs.symlink(outside, path.join(piDir, "skills", "outdir"));
+				const prev = process.env.PI_CODING_AGENT_DIR;
+				process.env.PI_CODING_AGENT_DIR = piDir;
+				try {
+					const result = await syncPull({
+						syncRepoDir,
+						homeDir: path.join(tmpDir, "home"),
+						environments: [new PiEnvironment()],
+					});
+					expect(result.skippedLinks).toEqual(["pi: skills/outdir/evil"]);
+				} finally {
+					if (prev === undefined) delete process.env.PI_CODING_AGENT_DIR;
+					else process.env.PI_CODING_AGENT_DIR = prev;
+				}
+				expect(await fs.readdir(outside)).toEqual([]);
+			},
+		);
+
+		it.skipIf(process.platform === "win32")(
+			"claude: behaviour unchanged (still writes through a local link)",
+			async () => {
+				const { syncRepoDir, outside } = await setup("claude");
+				const claudeDir = path.join(tmpDir, "home", ".claude");
+				await fs.mkdir(path.join(claudeDir, "skills"), { recursive: true });
+				await fs.symlink(outside, path.join(claudeDir, "skills", "outdir"));
 				const result = await syncPull({
 					syncRepoDir,
 					homeDir: path.join(tmpDir, "home"),
-					environments: [new PiEnvironment()],
+					environments: [new TmpClaude(claudeDir)],
 				});
-				expect(result.skippedLinks).toEqual(["pi: skills/outdir/evil"]);
-			} finally {
-				if (prev === undefined) delete process.env.PI_CODING_AGENT_DIR;
-				else process.env.PI_CODING_AGENT_DIR = prev;
-			}
-			expect(await fs.readdir(outside)).toEqual([]);
-		});
-
-		it("claude: behaviour unchanged (still writes through a local link)", async () => {
-			const { syncRepoDir, outside } = await setup("claude");
-			const claudeDir = path.join(tmpDir, "home", ".claude");
-			await fs.mkdir(path.join(claudeDir, "skills"), { recursive: true });
-			await fs.symlink(outside, path.join(claudeDir, "skills", "outdir"));
-			const result = await syncPull({
-				syncRepoDir,
-				homeDir: path.join(tmpDir, "home"),
-				environments: [new TmpClaude(claudeDir)],
-			});
-			expect(result.skippedLinks).toBeUndefined();
-			expect(await fs.readFile(path.join(outside, "evil"), "utf-8")).toBe("EVIL");
-		});
+				expect(result.skippedLinks).toBeUndefined();
+				expect(await fs.readFile(path.join(outside, "evil"), "utf-8")).toBe("EVIL");
+			},
+		);
 	});
 
 	describe("push never copies secrets", () => {
@@ -236,6 +261,111 @@ describe("PiEnvironment", () => {
 		afterEach(async () => {
 			await fs.rm(tmpDir, { recursive: true, force: true });
 		});
+
+		async function initRepoWithRemote(): Promise<{
+			syncRepoDir: string;
+			homeDir: string;
+			piDir: string;
+		}> {
+			const bareDir = path.join(tmpDir, "bare.git");
+			const syncRepoDir = path.join(tmpDir, "sync-repo");
+			const homeDir = path.join(tmpDir, "home");
+			const piDir = path.join(homeDir, ".pi", "agent");
+			await fs.mkdir(bareDir, { recursive: true });
+			await simpleGit(bareDir).init(true);
+			await fs.mkdir(syncRepoDir, { recursive: true });
+			await initRepo(syncRepoDir);
+			await simpleGit(syncRepoDir).addConfig("user.email", "t@t.com");
+			await simpleGit(syncRepoDir).addConfig("user.name", "T");
+			await simpleGit(syncRepoDir).addConfig("commit.gpgsign", "false");
+			await addRemote(syncRepoDir, "origin", bareDir);
+			await fs.writeFile(path.join(syncRepoDir, ".sync-version"), "2");
+			await fs.writeFile(path.join(syncRepoDir, ".gitkeep"), "");
+			await addFiles(syncRepoDir, [".gitkeep", ".sync-version"]);
+			await commitFiles(syncRepoDir, "initial");
+			await simpleGit(syncRepoDir).push("origin", "main");
+			await simpleGit(syncRepoDir).branch(["--set-upstream-to=origin/main", "main"]);
+			return { syncRepoDir, homeDir, piDir };
+		}
+
+		async function pushPi(
+			syncRepoDir: string,
+			homeDir: string,
+			piDir: string,
+		): Promise<Awaited<ReturnType<typeof syncPush>>> {
+			const prev = process.env.PI_CODING_AGENT_DIR;
+			process.env.PI_CODING_AGENT_DIR = piDir;
+			try {
+				return await syncPush({ syncRepoDir, homeDir, environments: [new PiEnvironment()] });
+			} finally {
+				if (prev === undefined) delete process.env.PI_CODING_AGENT_DIR;
+				else process.env.PI_CODING_AGENT_DIR = prev;
+			}
+		}
+
+		it.skipIf(process.platform === "win32")(
+			"keeps previously synced files when a directory becomes an external link",
+			async () => {
+				const { syncRepoDir, homeDir, piDir } = await initRepoWithRemote();
+				await fs.mkdir(path.join(piDir, "extensions", "sub"), { recursive: true });
+				await fs.writeFile(path.join(piDir, "extensions", "a.ts"), "a");
+				await fs.writeFile(path.join(piDir, "extensions", "sub", "b.ts"), "b");
+				await fs.writeFile(path.join(piDir, "AGENTS.md"), "x");
+				await pushPi(syncRepoDir, homeDir, piDir);
+
+				const ext = path.join(tmpDir, "dotfiles", "pi-ext");
+				await fs.mkdir(ext, { recursive: true });
+				await fs.writeFile(path.join(ext, "a.ts"), "other");
+				await fs.rm(path.join(piDir, "extensions"), { recursive: true });
+				await fs.symlink(ext, path.join(piDir, "extensions"));
+				await fs.rm(path.join(piDir, "AGENTS.md"));
+
+				const result = await pushPi(syncRepoDir, homeDir, piDir);
+				expect(result.skippedLinks).toContain("pi: extensions");
+				await expect(
+					fs.readFile(path.join(syncRepoDir, "pi", "extensions", "a.ts"), "utf-8"),
+				).resolves.toBe("a");
+				await expect(
+					fs.readFile(path.join(syncRepoDir, "pi", "extensions", "sub", "b.ts"), "utf-8"),
+				).resolves.toBe("b");
+				// unrelated deletions are still propagated
+				await expect(fs.access(path.join(syncRepoDir, "pi", "AGENTS.md"))).rejects.toThrow();
+			},
+		);
+
+		it.skipIf(process.platform === "win32")(
+			"does not write through a link inside the repo subdir",
+			async () => {
+				const { syncRepoDir, homeDir, piDir } = await initRepoWithRemote();
+				const outside = path.join(tmpDir, "outside");
+				await fs.mkdir(outside, { recursive: true });
+				await fs.mkdir(path.join(syncRepoDir, "pi"), { recursive: true });
+				await fs.symlink(outside, path.join(syncRepoDir, "pi", "extensions"));
+				await fs.mkdir(path.join(piDir, "extensions"), { recursive: true });
+				await fs.writeFile(path.join(piDir, "extensions", "x.ts"), "export {}");
+				const result = await pushPi(syncRepoDir, homeDir, piDir);
+				expect(await fs.readdir(outside)).toEqual([]);
+				expect(result.skippedLinks).toContain("pi: extensions/x.ts");
+			},
+		);
+
+		it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+			"fails closed when the repo subdir cannot be inspected (EACCES)",
+			async () => {
+				const { syncRepoDir, homeDir, piDir } = await initRepoWithRemote();
+				const locked = path.join(syncRepoDir, "pi", "extensions");
+				await fs.mkdir(locked, { recursive: true });
+				await fs.chmod(locked, 0o000);
+				try {
+					await fs.mkdir(path.join(piDir, "extensions"), { recursive: true });
+					await fs.writeFile(path.join(piDir, "extensions", "x.ts"), "export {}");
+					const result = await pushPi(syncRepoDir, homeDir, piDir);
+					expect(result.skippedLinks).toContain("pi: extensions/x.ts");
+				} finally {
+					await fs.chmod(locked, 0o755);
+				}
+			},
+		);
 
 		it("copies only extensions/x.ts when auth.json and models.json are present", async () => {
 			const bareDir = path.join(tmpDir, "bare.git");
@@ -248,6 +378,7 @@ describe("PiEnvironment", () => {
 			await initRepo(syncRepoDir);
 			await simpleGit(syncRepoDir).addConfig("user.email", "t@t.com");
 			await simpleGit(syncRepoDir).addConfig("user.name", "T");
+			await simpleGit(syncRepoDir).addConfig("commit.gpgsign", "false");
 			await addRemote(syncRepoDir, "origin", bareDir);
 			await fs.writeFile(path.join(syncRepoDir, ".sync-version"), "2");
 			await fs.writeFile(path.join(syncRepoDir, ".gitkeep"), "");
@@ -283,51 +414,55 @@ describe("PiEnvironment", () => {
 			expect(tracked).not.toContain("models.json");
 		});
 
-		it("skips symlinks resolving outside the config dir and reports them", async () => {
-			const bareDir = path.join(tmpDir, "bare.git");
-			const syncRepoDir = path.join(tmpDir, "sync-repo");
-			const homeDir = path.join(tmpDir, "home");
-			const piDir = path.join(homeDir, ".pi", "agent");
-			await fs.mkdir(bareDir, { recursive: true });
-			await simpleGit(bareDir).init(true);
-			await fs.mkdir(syncRepoDir, { recursive: true });
-			await initRepo(syncRepoDir);
-			await simpleGit(syncRepoDir).addConfig("user.email", "t@t.com");
-			await simpleGit(syncRepoDir).addConfig("user.name", "T");
-			await addRemote(syncRepoDir, "origin", bareDir);
-			await fs.writeFile(path.join(syncRepoDir, ".sync-version"), "2");
-			await fs.writeFile(path.join(syncRepoDir, ".gitkeep"), "");
-			await addFiles(syncRepoDir, [".gitkeep", ".sync-version"]);
-			await commitFiles(syncRepoDir, "initial");
-			await simpleGit(syncRepoDir).push("origin", "main");
-			await simpleGit(syncRepoDir).branch(["--set-upstream-to=origin/main", "main"]);
+		it.skipIf(process.platform === "win32")(
+			"skips symlinks resolving outside the config dir and reports them",
+			async () => {
+				const bareDir = path.join(tmpDir, "bare.git");
+				const syncRepoDir = path.join(tmpDir, "sync-repo");
+				const homeDir = path.join(tmpDir, "home");
+				const piDir = path.join(homeDir, ".pi", "agent");
+				await fs.mkdir(bareDir, { recursive: true });
+				await simpleGit(bareDir).init(true);
+				await fs.mkdir(syncRepoDir, { recursive: true });
+				await initRepo(syncRepoDir);
+				await simpleGit(syncRepoDir).addConfig("user.email", "t@t.com");
+				await simpleGit(syncRepoDir).addConfig("user.name", "T");
+				await simpleGit(syncRepoDir).addConfig("commit.gpgsign", "false");
+				await addRemote(syncRepoDir, "origin", bareDir);
+				await fs.writeFile(path.join(syncRepoDir, ".sync-version"), "2");
+				await fs.writeFile(path.join(syncRepoDir, ".gitkeep"), "");
+				await addFiles(syncRepoDir, [".gitkeep", ".sync-version"]);
+				await commitFiles(syncRepoDir, "initial");
+				await simpleGit(syncRepoDir).push("origin", "main");
+				await simpleGit(syncRepoDir).branch(["--set-upstream-to=origin/main", "main"]);
 
-			await fs.mkdir(path.join(piDir, "extensions"), { recursive: true });
-			await fs.writeFile(path.join(piDir, "extensions", "x.ts"), "export {}");
-			const outside = path.join(tmpDir, "outside");
-			await fs.mkdir(outside, { recursive: true });
-			await fs.writeFile(path.join(outside, "id_rsa"), "PRIVATE");
-			await fs.symlink(path.join(outside, "id_rsa"), path.join(piDir, "extensions", "key.ts"));
+				await fs.mkdir(path.join(piDir, "extensions"), { recursive: true });
+				await fs.writeFile(path.join(piDir, "extensions", "x.ts"), "export {}");
+				const outside = path.join(tmpDir, "outside");
+				await fs.mkdir(outside, { recursive: true });
+				await fs.writeFile(path.join(outside, "id_rsa"), "PRIVATE");
+				await fs.symlink(path.join(outside, "id_rsa"), path.join(piDir, "extensions", "key.ts"));
 
-			const env = new PiEnvironment();
-			const prev = process.env.PI_CODING_AGENT_DIR;
-			process.env.PI_CODING_AGENT_DIR = piDir;
-			let result: Awaited<ReturnType<typeof syncPush>>;
-			try {
-				result = await syncPush({ syncRepoDir, homeDir, environments: [env] });
-			} finally {
-				if (prev === undefined) delete process.env.PI_CODING_AGENT_DIR;
-				else process.env.PI_CODING_AGENT_DIR = prev;
-			}
+				const env = new PiEnvironment();
+				const prev = process.env.PI_CODING_AGENT_DIR;
+				process.env.PI_CODING_AGENT_DIR = piDir;
+				let result: Awaited<ReturnType<typeof syncPush>>;
+				try {
+					result = await syncPush({ syncRepoDir, homeDir, environments: [env] });
+				} finally {
+					if (prev === undefined) delete process.env.PI_CODING_AGENT_DIR;
+					else process.env.PI_CODING_AGENT_DIR = prev;
+				}
 
-			expect(result.skippedLinks).toEqual(["pi: extensions/key.ts"]);
-			await expect(
-				fs.readFile(path.join(syncRepoDir, "pi", "extensions", "x.ts"), "utf-8"),
-			).resolves.toBe("export {}");
-			await expect(
-				fs.access(path.join(syncRepoDir, "pi", "extensions", "key.ts")),
-			).rejects.toThrow();
-			expect(await simpleGit(syncRepoDir).raw(["ls-files"])).not.toContain("key.ts");
-		});
+				expect(result.skippedLinks).toEqual(["pi: extensions/key.ts"]);
+				await expect(
+					fs.readFile(path.join(syncRepoDir, "pi", "extensions", "x.ts"), "utf-8"),
+				).resolves.toBe("export {}");
+				await expect(
+					fs.access(path.join(syncRepoDir, "pi", "extensions", "key.ts")),
+				).rejects.toThrow();
+				expect(await simpleGit(syncRepoDir).raw(["ls-files"])).not.toContain("key.ts");
+			},
+		);
 	});
 });

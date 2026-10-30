@@ -114,7 +114,9 @@ async function scanDir(
 				let real: string;
 				try {
 					real = await fs.realpath(fullPath);
-				} catch {
+				} catch (err) {
+					// Unverifiable link (e.g. EACCES): never follow it, but report it.
+					if ((err as NodeJS.ErrnoException).code === "EACCES") skippedLinks?.push(relativePath);
 					continue;
 				}
 				if (real !== rootReal && !isInsideRoot(path.relative(rootReal, real))) {

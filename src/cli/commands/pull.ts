@@ -49,7 +49,10 @@ export function registerPullCommand(program: Command): void {
 		.option("-v, --verbose", "Show detailed file changes", false)
 		.option("-n, --dry-run", "Show what would be pulled without making changes", false)
 		.option("-f, --force", "Overwrite locally modified files instead of preserving them", false)
-		.option("--env <id>", "Only pull a specific environment (e.g., claude or opencode)")
+		.option(
+			"--env <id>",
+			"Only pull a specific environment (claude, codex, opencode, antigravity or pi)",
+		)
 		.option("--no-provision", "Skip tool provisioning")
 		.action(
 			async (opts: {

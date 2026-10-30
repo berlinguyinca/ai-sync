@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
 	DEFAULT_SYNC_TARGETS,
 	isPathAllowed,
+	isPathIgnored,
 	isRepoLevelPathAllowed,
 	PLUGIN_IGNORE_PATTERNS,
 	PLUGIN_SYNC_PATTERNS,
@@ -159,9 +160,9 @@ describe("manifest", () => {
 		});
 
 		it("allows files under plugins/data/ directory", () => {
-			expect(
-				isPathAllowed("plugins/data/superpowers-claude-plugins-official/state.json"),
-			).toBe(true);
+			expect(isPathAllowed("plugins/data/superpowers-claude-plugins-official/state.json")).toBe(
+				true,
+			);
 		});
 
 		it("rejects unknown directories", () => {
@@ -191,6 +192,22 @@ describe("manifest", () => {
 
 		it("rejects paths that are prefix matches but not under a target dir", () => {
 			expect(isRepoLevelPathAllowed("shared-other/file.txt")).toBe(false);
+		});
+	});
+
+	describe("root-anchored ignore patterns", () => {
+		it("matches only at the config root when the pattern starts with /", () => {
+			expect(isPathIgnored("git/a", ["/git/"])).toBe(true);
+			expect(isPathIgnored("git/x/b", ["/git/"])).toBe(true);
+			expect(isPathIgnored("skills/git/a", ["/git/"])).toBe(false);
+			expect(isPathIgnored("GIT/a", ["/git/"])).toBe(true);
+			expect(isPathIgnored("git", ["/git/"])).toBe(false);
+			expect(isPathIgnored("gitx/a", ["/git/"])).toBe(false);
+		});
+
+		it("anchors file patterns too", () => {
+			expect(isPathIgnored("x.json", ["/x.json"])).toBe(true);
+			expect(isPathIgnored("a/x.json", ["/x.json"])).toBe(false);
 		});
 	});
 });

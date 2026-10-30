@@ -256,9 +256,15 @@ export async function syncPush(options: SyncOptions): Promise<SyncPushResult> {
 				if (!options.dryRun) {
 					// Copy each file from configDir to repoSubdir
 					await fs.mkdir(repoSubdir, { recursive: true });
+					const guardRepo = allowlistFn.followExternalSymlinks === false;
+					const repoRootReal = guardRepo ? await resolveRootReal(repoSubdir) : "";
 					for (const relativePath of localFiles) {
 						const srcPath = path.join(configDir, relativePath);
 						const destPath = path.join(repoSubdir, relativePath);
+						if (guardRepo && (await destEscapesRoot(repoRootReal, destPath))) {
+							skippedLinks.push(`${env.id}: ${relativePath}`);
+							continue;
+						}
 						await fs.mkdir(path.dirname(destPath), { recursive: true });
 						let content = await fs.readFile(srcPath, "utf-8");
 						if (needsPathRewrite(relativePath, env)) {
@@ -273,9 +279,16 @@ export async function syncPush(options: SyncOptions): Promise<SyncPushResult> {
 						const repoFiles = await scanDirectory(repoSubdir, allowlistFn);
 						const localFileSet = new Set(localFiles);
 						for (const repoFile of repoFiles) {
-							if (!localFileSet.has(repoFile)) {
-								await fs.rm(path.join(repoSubdir, repoFile));
+							if (localFileSet.has(repoFile)) continue;
+							// Never prune what a skipped external link hides locally.
+							if (skipped.some((sk) => repoFile === sk || repoFile.startsWith(`${sk}/`))) continue;
+							if (
+								guardRepo &&
+								(await destEscapesRoot(repoRootReal, path.join(repoSubdir, repoFile)))
+							) {
+								continue;
 							}
+							await fs.rm(path.join(repoSubdir, repoFile));
 						}
 					} catch {
 						// Subdir might not exist yet
@@ -460,16 +473,31 @@ export async function syncPush(options: SyncOptions): Promise<SyncPushResult> {
 }
 
 /**
- * True when `destPath` (or its deepest existing ancestor) resolves outside `configDir`,
- * or is a dangling symlink, so a write/remove there would go through a local link.
+ * Resolves a config root once per environment per run. Returns "" when the root does not
+ * exist (nothing can escape it) and null when it cannot be inspected (EACCES etc.),
+ * which makes destEscapesRoot fail closed.
  */
-async function destEscapesRoot(configDir: string, destPath: string): Promise<boolean> {
-	let rootReal: string;
+async function resolveRootReal(configDir: string): Promise<string | null> {
 	try {
-		rootReal = await fs.realpath(configDir);
-	} catch {
-		return false;
+		return await fs.realpath(configDir);
+	} catch (err) {
+		return isNotFound(err) ? "" : null;
 	}
+}
+
+function isNotFound(err: unknown): boolean {
+	const code = (err as NodeJS.ErrnoException).code;
+	return code === "ENOENT" || code === "ENOTDIR";
+}
+
+/**
+ * True when `destPath` (or its deepest existing ancestor) resolves outside the root
+ * (as returned by resolveRootReal), or is a dangling symlink, so a write/remove there
+ * would go through a link. Fails closed (true) on errors other than "does not exist".
+ */
+async function destEscapesRoot(rootReal: string | null, destPath: string): Promise<boolean> {
+	if (rootReal === null) return true;
+	if (rootReal === "") return false;
 	let current = destPath;
 	for (;;) {
 		try {
@@ -479,10 +507,12 @@ async function destEscapesRoot(configDir: string, destPath: string): Promise<boo
 				rel === "" ||
 				(rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel))
 			);
-		} catch {
+		} catch (err) {
+			if (!isNotFound(err)) return true;
 			try {
 				if ((await fs.lstat(current)).isSymbolicLink()) return true;
-			} catch {
+			} catch (lerr) {
+				if (!isNotFound(lerr)) return true;
 				// does not exist; check the parent
 			}
 		}
@@ -641,11 +671,15 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 				}
 
 				const repoFileSet = new Set(repoFiles);
+				const configRootReal = await resolveRootReal(configDir);
 
 				for (const relativePath of repoFiles) {
 					const srcPath = path.join(repoSubdir, relativePath);
 					const destPath = path.join(configDir, relativePath);
-					if (!allowlistFn.followExternalSymlinks && (await destEscapesRoot(configDir, destPath))) {
+					if (
+						!allowlistFn.followExternalSymlinks &&
+						(await destEscapesRoot(configRootReal, destPath))
+					) {
 						skippedLinks.push(`${env.id}: ${relativePath}`);
 						continue;
 					}
@@ -782,7 +816,7 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 								}
 								if (
 									!allowlistFn.followExternalSymlinks &&
-									(await destEscapesRoot(configDir, path.join(configDir, localFile)))
+									(await destEscapesRoot(configRootReal, path.join(configDir, localFile)))
 								) {
 									skippedLinks.push(`${env.id}: ${localFile}`);
 									continue;
