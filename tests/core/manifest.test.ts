@@ -122,7 +122,36 @@ describe("manifest", () => {
 			expect(isPathAllowed("a/deep/b.json", t, [], ["b.json"])).toBe(false);
 			expect(isPathAllowed("a/x.bak1", t, [], ["*.bak*"])).toBe(false);
 			expect(isPathAllowed("a/x.txt", t, [], ["*.bak*"])).toBe(true);
-			expect(isPathAllowed("a/orch-1/x", t, [], ["orch-*/"])).toBe(true);
+			expect(isPathAllowed("a/orch-1/x", t, [], ["orch-*/"])).toBe(false);
+		});
+
+		it("matches single-segment directory patterns at any depth", () => {
+			const t = ["a/"];
+			expect(isPathAllowed("a/logs/x.log", t, [], ["logs/"])).toBe(false);
+			expect(isPathAllowed("a/b/logs/x.log", t, [], ["logs/"])).toBe(false);
+			expect(isPathAllowed("a/b/orch-9/x", t, [], ["orch-*/"])).toBe(false);
+			expect(isPathAllowed("a/logs.txt", t, [], ["logs/"])).toBe(true);
+		});
+
+		it("anchors directory patterns with an inner slash at the config root", () => {
+			const t = ["a/", "b/"];
+			expect(isPathAllowed("a/skip/x", t, [], ["a/skip/"])).toBe(false);
+			expect(isPathAllowed("b/a/skip/x", t, [], ["a/skip/"])).toBe(true);
+		});
+
+		it("matches ignore patterns case-insensitively", () => {
+			const t = ["extensions/"];
+			expect(isPathAllowed("extensions/Auth.json", t, [], ["auth.json"])).toBe(false);
+			expect(isPathAllowed("extensions/x/engineering.YAML", t, [], ["engineering.yaml"])).toBe(
+				false,
+			);
+			expect(isPathAllowed("extensions/Logs/a", t, [], ["logs/"])).toBe(false);
+		});
+
+		it("treats ? in ignore patterns literally", () => {
+			const t = ["a/"];
+			expect(isPathAllowed("a/x?.json", t, [], ["x?.json"])).toBe(false);
+			expect(isPathAllowed("a/xy.json", t, [], ["x?.json"])).toBe(true);
 		});
 
 		it("allows files nested under plugin sync directories", () => {
@@ -130,9 +159,9 @@ describe("manifest", () => {
 		});
 
 		it("allows files under plugins/data/ directory", () => {
-			expect(isPathAllowed("plugins/data/superpowers-claude-plugins-official/state.json")).toBe(
-				true,
-			);
+			expect(
+				isPathAllowed("plugins/data/superpowers-claude-plugins-official/state.json"),
+			).toBe(true);
 		});
 
 		it("rejects unknown directories", () => {

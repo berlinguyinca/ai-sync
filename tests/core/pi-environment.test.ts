@@ -71,24 +71,34 @@ describe("PiEnvironment", () => {
 			"skills/x/engineering.yaml",
 			"extensions/x.ts.bak",
 			"extensions/x.bak.1",
-			"extensions/pre-migration.ts",
-			"prompts/foo-pre-edit.md",
-			"logs/a.log",
-			"backups/a",
-			"archive/a",
-			"git/a",
-			"npm/a",
-			"install/a",
-			"engineering-memory/a",
-			"orch-123/a",
-			"orch-abc/sub/b",
+			"models.json.pre-dynamic-context.2026",
+			"qwen-nodes.json.pre-deturing.2026",
+			"extensions/foo.ts.pre-x",
+			"extensions/foo.ts.bak-2026",
+			"extensions/.env",
+			"extensions/.env.local",
+			"extensions/x.json~",
+			"extensions/Auth.json",
+			"x/engineering.YAML",
+			"extensions/x/logs/a.log",
+			"engineering-panel/orch-1/a",
+			"engineering-panel/engineering-memory/a",
+			"extensions/x/git/a",
+			"extensions/x/backups/a",
+			"extensions/x/archive/a",
+			"extensions/x/npm/a",
+			"extensions/x/install/a",
+			"extensions/x/orch-abc/sub/b",
 		])("never allows %s", (p) => {
 			expect(allowed(p)).toBe(false);
 		});
 
 		it("does not over-block unrelated names", () => {
 			expect(allowed("extensions/git-helper.ts")).toBe(true);
-			expect(allowed("extensions/npm/x.ts")).toBe(true);
+			expect(allowed("prompts/foo-pre-edit.md")).toBe(true);
+			expect(allowed("skills/x/pre-commit.md")).toBe(true);
+			expect(allowed("extensions/pre-migration.ts")).toBe(true);
+			expect(allowed("extensions/npm-helper/x.ts")).toBe(true);
 		});
 	});
 

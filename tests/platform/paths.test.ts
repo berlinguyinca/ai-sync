@@ -112,7 +112,9 @@ describe("getOpenCodeConfigDir", () => {
 
 	it("defaults to ~/.config/opencode when XDG_CONFIG_HOME is not set", () => {
 		delete process.env.XDG_CONFIG_HOME;
-		expect(getOpenCodeConfigDir()).toBe(path.join(os.homedir(), ".config", "opencode"));
+		expect(getOpenCodeConfigDir()).toBe(
+			path.join(os.homedir(), ".config", "opencode"),
+		);
 	});
 
 	it("respects XDG_CONFIG_HOME when set", () => {

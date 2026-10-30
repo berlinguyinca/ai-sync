@@ -2,7 +2,36 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { makeAllowlistFn } from "../../src/core/env-helpers.js";
+import type { Environment } from "../../src/core/environment.js";
 import { scanDirectory } from "../../src/core/scanner.js";
+
+class TestEnv implements Environment {
+	readonly id = "test";
+	readonly displayName = "Test";
+	constructor(
+		private readonly targets: readonly string[],
+		private readonly ignores: readonly string[],
+	) {}
+	getConfigDir(): string {
+		return "/unused";
+	}
+	getSyncTargets(): readonly string[] {
+		return this.targets;
+	}
+	getPluginSyncPatterns(): readonly string[] {
+		return [];
+	}
+	getIgnorePatterns(): readonly string[] {
+		return this.ignores;
+	}
+	getPathRewriteTargets(): string[] {
+		return [];
+	}
+	getSkillsSubdir(): string | null {
+		return null;
+	}
+}
 
 describe("scanner", () => {
 	let tmpDir: string;
@@ -142,5 +171,66 @@ describe("scanner", () => {
 		}
 		expect(result).toContain("agents/skill/SKILL.md");
 		expect(result).toContain("hooks/pre-push.sh");
+	});
+});
+
+describe("scanner symlinks to ignored files", () => {
+	let tmpDir: string;
+
+	beforeEach(async () => {
+		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-sync-symlink-"));
+	});
+
+	afterEach(async () => {
+		await fs.rm(tmpDir, { recursive: true, force: true });
+	});
+
+	const targets = ["extensions/"];
+	const ignores = ["auth.json", "models.json", "logs/"];
+	const allow = () => makeAllowlistFn(new TestEnv(targets, ignores));
+
+	it("skips a symlink pointing at an ignored file inside the config dir", async () => {
+		await fs.mkdir(path.join(tmpDir, "extensions"), { recursive: true });
+		await fs.writeFile(path.join(tmpDir, "auth.json"), '{"k":"secret"}');
+		await fs.writeFile(path.join(tmpDir, "extensions", "ok.ts"), "export {}");
+		await fs.symlink("../auth.json", path.join(tmpDir, "extensions", "creds"));
+
+		const result = await scanDirectory(tmpDir, allow());
+		expect(result).toEqual(["extensions/ok.ts"]);
+	});
+
+	it("skips a symlink pointing at an ignored file outside the config dir", async () => {
+		const outside = await fs.mkdtemp(path.join(os.tmpdir(), "ai-sync-outside-"));
+		try {
+			await fs.writeFile(path.join(outside, "models.json"), "secret");
+			await fs.mkdir(path.join(tmpDir, "extensions"), { recursive: true });
+			await fs.symlink(path.join(outside, "models.json"), path.join(tmpDir, "extensions", "m"));
+
+			expect(await scanDirectory(tmpDir, allow())).toEqual([]);
+		} finally {
+			await fs.rm(outside, { recursive: true, force: true });
+		}
+	});
+
+	it("skips a symlink to a file inside an ignored directory of the config dir", async () => {
+		await fs.mkdir(path.join(tmpDir, "logs"), { recursive: true });
+		await fs.mkdir(path.join(tmpDir, "extensions"), { recursive: true });
+		await fs.writeFile(path.join(tmpDir, "logs", "a.log"), "log");
+		await fs.symlink("../logs/a.log", path.join(tmpDir, "extensions", "l"));
+
+		expect(await scanDirectory(tmpDir, allow())).toEqual([]);
+	});
+
+	it("still syncs a symlink to a non-ignored external file", async () => {
+		const outside = await fs.mkdtemp(path.join(os.tmpdir(), "ai-sync-outside-"));
+		try {
+			await fs.writeFile(path.join(outside, "helper.ts"), "export {}");
+			await fs.mkdir(path.join(tmpDir, "extensions"), { recursive: true });
+			await fs.symlink(path.join(outside, "helper.ts"), path.join(tmpDir, "extensions", "h.ts"));
+
+			expect(await scanDirectory(tmpDir, allow())).toEqual(["extensions/h.ts"]);
+		} finally {
+			await fs.rm(outside, { recursive: true, force: true });
+		}
 	});
 });
