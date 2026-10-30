@@ -50,18 +50,18 @@ async function writeSyncConfig(repoDir: string, content: string): Promise<void> 
 
 describe("loadSyncConfig()", () => {
 	it("returns plugins=true when the file is absent", async () => {
-		expect(await loadSyncConfig(baseDir)).toEqual({ plugins: true });
-		expect(defaultSyncConfig()).toEqual({ plugins: true });
+		expect(await loadSyncConfig(baseDir)).toEqual({ plugins: true, verify: false });
+		expect(defaultSyncConfig()).toEqual({ plugins: true, verify: false });
 	});
 
 	it("defaults plugins to true for an empty object", async () => {
 		await writeSyncConfig(baseDir, "{}");
-		expect(await loadSyncConfig(baseDir)).toEqual({ plugins: true });
+		expect(await loadSyncConfig(baseDir)).toEqual({ plugins: true, verify: false });
 	});
 
 	it("reads plugins=false", async () => {
 		await writeSyncConfig(baseDir, '{"plugins": false}');
-		expect(await loadSyncConfig(baseDir)).toEqual({ plugins: false });
+		expect(await loadSyncConfig(baseDir)).toEqual({ plugins: false, verify: false });
 	});
 
 	it("rejects unknown keys naming the key", async () => {
@@ -366,5 +366,20 @@ describe("ai-sync status output", () => {
 		expect(await runStatus(fx.repoDir, fx.configDir)).toContain(
 			"plugins: not synced (tools/sync-config.json)",
 		);
+	});
+});
+
+describe("verify option", () => {
+	it("defaults to false and accepts true", async () => {
+		expect(defaultSyncConfig().verify).toBe(false);
+		await fs.mkdir(path.join(baseDir, "tools"), { recursive: true });
+		await fs.writeFile(path.join(baseDir, "tools", "sync-config.json"), '{"verify": true}');
+		expect((await loadSyncConfig(baseDir)).verify).toBe(true);
+	});
+
+	it("rejects a non-boolean verify", async () => {
+		await fs.mkdir(path.join(baseDir, "tools"), { recursive: true });
+		await fs.writeFile(path.join(baseDir, "tools", "sync-config.json"), '{"verify": "yes"}');
+		await expect(loadSyncConfig(baseDir)).rejects.toThrow(/verify/);
 	});
 });
