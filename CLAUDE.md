@@ -54,3 +54,7 @@ to opt out.
 - Always use autospec for multi-step feature work: `/autospec-define` to brainstorm and decompose into linked GitHub issues, then `/autospec-run` for autonomous implementation with auto-merge.
 - For an existing tracked design spec, use `/autospec-split` then `/autospec-run`.
 - Single-task or bug-fix work that doesn't warrant a full spec can use `/turboplan` or `/implement` directly.
+
+## Testing safety
+
+Never weaken `tests/setup/hermetic-env.ts`: it keeps tests away from the real HOME (`~/.claude`, `~/.pi`, ...) and machine git config. See AGENTS.md "Testing safety". Prefer `HOME=$(mktemp -d) npx vitest run`.

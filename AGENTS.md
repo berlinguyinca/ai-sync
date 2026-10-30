@@ -58,3 +58,8 @@ Admin-merge `auto-implement` PRs (`gh pr merge <#> --admin --squash --delete-bra
 (c) the PR closes an `auto-implement` issue from a `feat/*` branch.
 
 TDD non-negotiable. Real services in tests (real fs in tmpdir + simple-git per existing `tests/core/sync-engine.test.ts` pattern), no DB mocks. Conventional commits. No force-push. No hook bypass.
+
+## Testing safety
+
+Tests build real environments (`~/.claude`, `~/.pi`, ...) and a pull deletes local files absent from the repo, so running them against a real HOME can wipe a user's config (this happened on 2026-10-30).
+`tests/setup/hermetic-env.ts` (vitest `setupFiles`) points HOME, USERPROFILE, XDG_CONFIG_HOME, CODEX_HOME and PI_CODING_AGENT_DIR at a temp dir, replaces global git config, and aborts the run if `os.homedir()` is the real home. Do not remove it. Still prefer `HOME=$(mktemp -d) npx vitest run`.
