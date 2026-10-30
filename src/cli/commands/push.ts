@@ -4,7 +4,7 @@ import { getEnabledEnvironmentInstances } from "../../core/env-config.js";
 import type { SyncPushResult } from "../../core/sync-engine.js";
 import { syncPush } from "../../core/sync-engine.js";
 import { getClaudeDir, getSyncRepoDir } from "../../platform/paths.js";
-import { printFileChanges } from "../format.js";
+import { printFileChanges, printSkippedLinks } from "../format.js";
 
 /**
  * Options for the push command handler.
@@ -72,6 +72,7 @@ export function registerPushCommand(program: Command): void {
 						console.error(pc.red("Errors during push:"));
 						printErrors(result.errors);
 					}
+					printSkippedLinks(result.skippedLinks);
 					if (result.dryRun) {
 						if (opts.verbose && result.fileChanges.length > 0) {
 							printFileChanges(result.fileChanges);

@@ -89,6 +89,8 @@ export interface SyncPushResult {
 	errors?: Record<string, string>;
 	/** True when --dry-run was used. */
 	dryRun?: boolean;
+	/** Symlinks skipped because they resolve outside the config dir ("<env>: <path>"). */
+	skippedLinks?: string[];
 }
 
 /**
@@ -118,6 +120,8 @@ export interface SyncPullResult {
 	dryRun?: boolean;
 	/** Result of tool provisioning, if manifest was found during pull. */
 	provisioning?: ProvisionResult;
+	/** Symlinks skipped because they resolve outside the config dir ("<env>: <path>"). */
+	skippedLinks?: string[];
 }
 
 /**
@@ -219,6 +223,7 @@ export async function syncPush(options: SyncOptions): Promise<SyncPushResult> {
 	verboseLog(options, `Repo version: v${version}`);
 	const perEnvironment: Record<string, { filesUpdated: number; fileChanges: FileChange[] }> = {};
 	const errors: Record<string, string> = {};
+	const skippedLinks: string[] = [];
 	const envs = options.filterEnv
 		? (options.environments ?? []).filter((e) => e.id === options.filterEnv)
 		: (options.environments ?? []);
@@ -243,7 +248,9 @@ export async function syncPush(options: SyncOptions): Promise<SyncPushResult> {
 
 				const allowlistFn = makeAllowlistFn(env);
 				verboseLog(options, `Scanning ${configDir}...`);
-				const localFiles = await scanDirectory(configDir, allowlistFn);
+				const skipped: string[] = [];
+				const localFiles = await scanDirectory(configDir, allowlistFn, skipped);
+				for (const s of skipped) skippedLinks.push(`${env.id}: ${s}`);
 				verboseLog(options, `Found ${localFiles.length} files for ${env.id}`);
 
 				if (!options.dryRun) {
@@ -328,6 +335,7 @@ export async function syncPush(options: SyncOptions): Promise<SyncPushResult> {
 				fileChanges: [],
 				perEnvironment: Object.keys(perEnvironment).length > 0 ? perEnvironment : undefined,
 				errors: errorsResult,
+				skippedLinks: skippedLinks.length > 0 ? skippedLinks : undefined,
 				dryRun: options.dryRun,
 			};
 		}
@@ -338,6 +346,7 @@ export async function syncPush(options: SyncOptions): Promise<SyncPushResult> {
 			fileChanges: [],
 			perEnvironment: Object.keys(perEnvironment).length > 0 ? perEnvironment : undefined,
 			errors: errorsResult,
+			skippedLinks: skippedLinks.length > 0 ? skippedLinks : undefined,
 			dryRun: options.dryRun,
 		};
 	}
@@ -379,6 +388,7 @@ export async function syncPush(options: SyncOptions): Promise<SyncPushResult> {
 			fileChanges,
 			perEnvironment: Object.keys(perEnvironment).length > 0 ? perEnvironment : undefined,
 			errors: errorsResult,
+			skippedLinks: skippedLinks.length > 0 ? skippedLinks : undefined,
 			dryRun: true,
 		};
 	}
@@ -445,6 +455,7 @@ export async function syncPush(options: SyncOptions): Promise<SyncPushResult> {
 		fileChanges,
 		perEnvironment: Object.keys(perEnvironment).length > 0 ? perEnvironment : undefined,
 		errors: errorsResult,
+		skippedLinks: skippedLinks.length > 0 ? skippedLinks : undefined,
 	};
 }
 
@@ -501,6 +512,7 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 			mergeConfig = { ...mergeConfig, enabled: false };
 		}
 	}
+	const skippedLinks: string[] = [];
 	const errors: Record<string, string> = {};
 	const envs = options.filterEnv
 		? (options.environments ?? []).filter((e) => e.id === options.filterEnv)
@@ -580,7 +592,9 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 				let repoFiles: string[] = [];
 				try {
 					await fs.access(repoSubdir);
-					repoFiles = await scanDirectory(repoSubdir, allowlistFn);
+					const skipped: string[] = [];
+					repoFiles = await scanDirectory(repoSubdir, allowlistFn, skipped);
+					for (const s of skipped) skippedLinks.push(`${env.id}: ${s}`);
 				} catch {
 					// No files for this environment in repo
 					perEnvironment[env.id] = { filesApplied: 0, fileChanges: [] };
@@ -968,6 +982,7 @@ export async function syncPull(options: SyncOptions): Promise<SyncPullResult> {
 		staged: allStaged.length > 0 ? allStaged : undefined,
 		perEnvironment: Object.keys(perEnvironment).length > 0 ? perEnvironment : undefined,
 		errors: hasErrors ? errors : undefined,
+		skippedLinks: skippedLinks.length > 0 ? skippedLinks : undefined,
 		dryRun: options.dryRun,
 		provisioning: provisioningResult,
 	};

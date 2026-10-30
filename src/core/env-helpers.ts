@@ -18,6 +18,7 @@ export function makeAllowlistFn(env: Environment): AllowlistFn {
 	const ignorePatterns = env.getIgnorePatterns();
 	return Object.assign(allowed, {
 		isIgnored: (relativePath: string): boolean => isPathIgnored(relativePath, ignorePatterns),
+		followExternalSymlinks: env.followExternalSymlinks?.() ?? true,
 	});
 }
 

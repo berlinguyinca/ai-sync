@@ -47,7 +47,7 @@ to opt out.
 - Tests use `describe`/`it`/`expect` with memfs for filesystem mocking
 - Git operations use explicit file paths, never `git add .`
 - Allowlist-based sync: only files in `DEFAULT_SYNC_TARGETS` / `PLUGIN_SYNC_PATTERNS` are synced
-- Environments (`src/core/environment.ts`): claude, codex, opencode, antigravity, pi. Pi (`~/.pi/agent` or `PI_CODING_AGENT_DIR`) syncs only portable dirs; its ignore patterns (`auth.json`, `models.json`, ...) win over targets and match file names at any depth (see README, "Pi — Excluded")
+- Environments (`src/core/environment.ts`): claude, codex, opencode, antigravity, pi. Pi (`~/.pi/agent` or `PI_CODING_AGENT_DIR`) syncs only portable dirs; its ignore patterns (`auth.json`, `models.json`, ...) win over targets and match file names at any depth (see README, "Pi — Excluded"). Pi also sets the optional `Environment.followExternalSymlinks()` to false: the scanner skips symlinks resolving outside the config root (reported via `skippedLinks`); absent = follow (all other envs)
 - Path rewriting: absolute paths ↔ `{{HOME}}` tokens for cross-platform portability
 
 ## Auto-merge authority for auto-implement PRs

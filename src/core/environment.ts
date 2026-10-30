@@ -23,6 +23,11 @@ export interface Environment {
 	getPathRewriteTargets(): string[];
 	/** Subdirectory name for slash-command skills, or null if not supported. */
 	getSkillsSubdir(): string | null;
+	/**
+	 * Whether symlinks resolving outside the config dir are followed during scans.
+	 * Treated as true when absent.
+	 */
+	followExternalSymlinks?(): boolean;
 }
 
 /**
@@ -267,6 +272,11 @@ export class PiEnvironment implements Environment {
 
 	getSkillsSubdir(): string | null {
 		return null;
+	}
+
+	/** A tampered link must never pull files from outside the config dir into a sync. */
+	followExternalSymlinks(): boolean {
+		return false;
 	}
 }
 

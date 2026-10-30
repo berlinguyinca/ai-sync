@@ -285,12 +285,12 @@ describe("scanner symlinks to ignored files", () => {
 			expect(result).toEqual([]);
 		});
 
-		it("still follows directory symlinks to non-ignored outside directories (Pi)", async () => {
+		it("skips directory symlinks to non-ignored outside directories (Pi)", async () => {
 			await write("shared/s.ts", outside);
 			await link(path.join(outside, "shared"), "extensions/ext_shared");
 
 			const result = await scanDirectory(cfg, makeAllowlistFn(new PiEnvironment()));
-			expect(result).toEqual(["extensions/ext_shared/s.ts"]);
+			expect(result).toEqual([]);
 		});
 
 		it("does not treat an in-root directory named '..d' as outside the root", async () => {
@@ -315,6 +315,41 @@ describe("scanner symlinks to ignored files", () => {
 
 			const result = await scanDirectory(cfg, makeAllowlistFn(new ClaudeEnvironment()));
 			expect(result).toContain("skills/skill-a/SKILL.md");
+		});
+
+		it("Pi skips file and directory symlinks resolving outside the root and reports them", async () => {
+			await write("id_rsa", outside);
+			await write("helpers/h.ts", outside);
+			await write("extensions/ok.ts");
+			await write("extensions/real/in.ts");
+			await link(path.join(outside, "id_rsa"), "extensions/key.ts");
+			await link(path.join(outside, "helpers"), "extensions/ext");
+			await link(path.join(cfg, "extensions", "real"), "extensions/inroot");
+			await link(path.join(outside, "id_rsa"), "sessions-link");
+
+			const skipped: string[] = [];
+			const result = await scanDirectory(cfg, makeAllowlistFn(new PiEnvironment()), skipped);
+			expect(result).toEqual([
+				"extensions/inroot/in.ts",
+				"extensions/ok.ts",
+				"extensions/real/in.ts",
+			]);
+			expect(skipped.sort()).toEqual(["extensions/ext", "extensions/key.ts"]);
+		});
+
+		it("Pi still skips in-root links to ignored files", async () => {
+			await write("auth.json");
+			await link(path.join(cfg, "auth.json"), "extensions/a.ts");
+			expect(await scanDirectory(cfg, makeAllowlistFn(new PiEnvironment()))).toEqual([]);
+		});
+
+		it("Claude still follows an outside file symlink and reports nothing skipped", async () => {
+			await write("x.md", outside);
+			await link(path.join(outside, "x.md"), "CLAUDE.md");
+			const skipped: string[] = [];
+			const result = await scanDirectory(cfg, makeAllowlistFn(new ClaudeEnvironment()), skipped);
+			expect(result).toContain("CLAUDE.md");
+			expect(skipped).toEqual([]);
 		});
 	});
 

@@ -156,5 +156,52 @@ describe("PiEnvironment", () => {
 			expect(tracked).not.toContain("auth.json");
 			expect(tracked).not.toContain("models.json");
 		});
+
+		it("skips symlinks resolving outside the config dir and reports them", async () => {
+			const bareDir = path.join(tmpDir, "bare.git");
+			const syncRepoDir = path.join(tmpDir, "sync-repo");
+			const homeDir = path.join(tmpDir, "home");
+			const piDir = path.join(homeDir, ".pi", "agent");
+			await fs.mkdir(bareDir, { recursive: true });
+			await simpleGit(bareDir).init(true);
+			await fs.mkdir(syncRepoDir, { recursive: true });
+			await initRepo(syncRepoDir);
+			await simpleGit(syncRepoDir).addConfig("user.email", "t@t.com");
+			await simpleGit(syncRepoDir).addConfig("user.name", "T");
+			await addRemote(syncRepoDir, "origin", bareDir);
+			await fs.writeFile(path.join(syncRepoDir, ".sync-version"), "2");
+			await fs.writeFile(path.join(syncRepoDir, ".gitkeep"), "");
+			await addFiles(syncRepoDir, [".gitkeep", ".sync-version"]);
+			await commitFiles(syncRepoDir, "initial");
+			await simpleGit(syncRepoDir).push("origin", "main");
+			await simpleGit(syncRepoDir).branch(["--set-upstream-to=origin/main", "main"]);
+
+			await fs.mkdir(path.join(piDir, "extensions"), { recursive: true });
+			await fs.writeFile(path.join(piDir, "extensions", "x.ts"), "export {}");
+			const outside = path.join(tmpDir, "outside");
+			await fs.mkdir(outside, { recursive: true });
+			await fs.writeFile(path.join(outside, "id_rsa"), "PRIVATE");
+			await fs.symlink(path.join(outside, "id_rsa"), path.join(piDir, "extensions", "key.ts"));
+
+			const env = new PiEnvironment();
+			const prev = process.env.PI_CODING_AGENT_DIR;
+			process.env.PI_CODING_AGENT_DIR = piDir;
+			let result: Awaited<ReturnType<typeof syncPush>>;
+			try {
+				result = await syncPush({ syncRepoDir, homeDir, environments: [env] });
+			} finally {
+				if (prev === undefined) delete process.env.PI_CODING_AGENT_DIR;
+				else process.env.PI_CODING_AGENT_DIR = prev;
+			}
+
+			expect(result.skippedLinks).toEqual(["pi: extensions/key.ts"]);
+			await expect(
+				fs.readFile(path.join(syncRepoDir, "pi", "extensions", "x.ts"), "utf-8"),
+			).resolves.toBe("export {}");
+			await expect(
+				fs.access(path.join(syncRepoDir, "pi", "extensions", "key.ts")),
+			).rejects.toThrow();
+			expect(await simpleGit(syncRepoDir).raw(["ls-files"])).not.toContain("key.ts");
+		});
 	});
 });

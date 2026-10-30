@@ -4,7 +4,7 @@ import { getEnabledEnvironmentInstances } from "../../core/env-config.js";
 import type { SyncPullResult } from "../../core/sync-engine.js";
 import { syncPull } from "../../core/sync-engine.js";
 import { getClaudeDir, getSyncRepoDir } from "../../platform/paths.js";
-import { printFileChanges } from "../format.js";
+import { printFileChanges, printSkippedLinks } from "../format.js";
 
 /**
  * Options for the pull command handler.
@@ -68,6 +68,7 @@ export function registerPullCommand(program: Command): void {
 							console.error(pc.red(`  ${envId}: ${message}`));
 						}
 					}
+					printSkippedLinks(result.skippedLinks);
 					if (opts.verbose && result.fileChanges.length > 0) {
 						printFileChanges(result.fileChanges);
 					}
@@ -103,23 +104,13 @@ export function registerPullCommand(program: Command): void {
 							}
 						}
 						if (p.installed.length > 0) {
-							console.log(
-								pc.green(`\nProvisioned ${p.installed.length} tool(s)`),
-							);
+							console.log(pc.green(`\nProvisioned ${p.installed.length} tool(s)`));
 						}
 						if (p.failed.length > 0) {
-							console.log(
-								pc.red(
-									`\n${p.failed.length} tool(s) failed to install`,
-								),
-							);
+							console.log(pc.red(`\n${p.failed.length} tool(s) failed to install`));
 						}
 						if (p.skipped.length > 0 && opts.verbose) {
-							console.log(
-								pc.dim(
-									`${p.skipped.length} tool(s) already installed`,
-								),
-							);
+							console.log(pc.dim(`${p.skipped.length} tool(s) already installed`));
 						}
 					}
 					if (!result.dryRun && result.backupDir) {
