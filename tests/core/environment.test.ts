@@ -9,6 +9,7 @@ import {
 	getEnvironmentById,
 	isFragmentCapable,
 	OpenCodeEnvironment,
+	PiEnvironment,
 } from "../../src/core/environment.js";
 
 describe("environment", () => {
@@ -239,17 +240,57 @@ describe("environment", () => {
 		});
 	});
 
+	describe("PiEnvironment", () => {
+		const pi = new PiEnvironment();
+
+		it("has id 'pi'", () => {
+			expect(pi.id).toBe("pi");
+		});
+
+		it("has display name 'Pi'", () => {
+			expect(pi.displayName).toBe("Pi");
+		});
+
+		it("config dir is ~/.pi/agent", () => {
+			expect(pi.getConfigDir()).toBe(path.join(os.homedir(), ".pi", "agent"));
+		});
+
+		it("has AGENTS.md as sync target", () => {
+			expect(pi.getSyncTargets()).toContain("AGENTS.md");
+		});
+
+		it("has extensions/ as sync target", () => {
+			expect(pi.getSyncTargets()).toContain("extensions/");
+		});
+
+		it("never syncs pi secrets", () => {
+			const targets = pi.getSyncTargets();
+			for (const secret of ["auth.json", "models.json", "models-store.json"]) {
+				expect(targets).not.toContain(secret);
+			}
+		});
+
+		it("has no plugin sync patterns", () => {
+			expect(pi.getPluginSyncPatterns()).toHaveLength(0);
+		});
+
+		it("does not define a skills subdir", () => {
+			expect(pi.getSkillsSubdir()).toBeNull();
+		});
+	});
+
 	describe("ALL_ENVIRONMENTS", () => {
-		it("contains claude, codex, opencode, and antigravity", () => {
+		it("contains claude, codex, opencode, antigravity, and pi", () => {
 			const ids = ALL_ENVIRONMENTS.map((e) => e.id);
 			expect(ids).toContain("claude");
 			expect(ids).toContain("codex");
 			expect(ids).toContain("opencode");
 			expect(ids).toContain("antigravity");
+			expect(ids).toContain("pi");
 		});
 
-		it("has exactly 4 environments", () => {
-			expect(ALL_ENVIRONMENTS).toHaveLength(4);
+		it("has exactly 5 environments", () => {
+			expect(ALL_ENVIRONMENTS).toHaveLength(5);
 		});
 	});
 
@@ -268,6 +309,10 @@ describe("environment", () => {
 
 		it("AntigravityEnvironment is not fragment capable", () => {
 			expect(isFragmentCapable(new AntigravityEnvironment())).toBe(false);
+		});
+
+		it("PiEnvironment is not fragment capable", () => {
+			expect(isFragmentCapable(new PiEnvironment())).toBe(false);
 		});
 
 		it("ClaudeEnvironment.getFragmentDirs() returns expected dirs", () => {
@@ -304,6 +349,12 @@ describe("environment", () => {
 			const env = getEnvironmentById("antigravity");
 			expect(env).toBeDefined();
 			expect(env?.id).toBe("antigravity");
+		});
+
+		it("returns pi environment for 'pi'", () => {
+			const env = getEnvironmentById("pi");
+			expect(env).toBeDefined();
+			expect(env?.id).toBe("pi");
 		});
 
 		it("returns undefined for unknown id", () => {

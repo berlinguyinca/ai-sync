@@ -204,12 +204,57 @@ export class AntigravityEnvironment implements Environment {
 	}
 }
 
+/**
+ * Pi environment — config lives at ~/.pi/agent
+ */
+export class PiEnvironment implements Environment {
+	readonly id = "pi";
+	readonly displayName = "Pi";
+
+	getConfigDir(): string {
+		return path.join(os.homedir(), ".pi", "agent");
+	}
+
+	getSyncTargets(): readonly string[] {
+		return ["AGENTS.md", "extensions/"];
+	}
+
+	getPluginSyncPatterns(): readonly string[] {
+		return [];
+	}
+
+	// Defensive: never sync pi secrets/caches even if sync targets are widened later.
+	getIgnorePatterns(): readonly string[] {
+		return [
+			"auth.json",
+			"models.json",
+			"models-store.json",
+			"trust.json",
+			"capability-cache.json",
+			"crashes.json",
+			"engineering-memory/",
+			"sessions/",
+			"install/",
+			"bin/",
+		];
+	}
+
+	getPathRewriteTargets(): string[] {
+		return [];
+	}
+
+	getSkillsSubdir(): string | null {
+		return null;
+	}
+}
+
 /** All known environments. */
 export const ALL_ENVIRONMENTS: readonly Environment[] = [
 	new ClaudeEnvironment(),
 	new CodexEnvironment(),
 	new OpenCodeEnvironment(),
 	new AntigravityEnvironment(),
+	new PiEnvironment(),
 ];
 
 /** Look up an environment by its id. */
