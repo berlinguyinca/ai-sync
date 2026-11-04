@@ -173,7 +173,14 @@ async function reloadSyncConfigAfterPull(
 	before: SyncConfig,
 ): Promise<SyncConfig> {
 	const after = await loadSyncConfig(syncRepoDir);
-	return { ...after, plugins: before.plugins && after.plugins };
+	// exclude is the union: a newly added exclusion protects local files at once, and a
+	// removed one stops applying only on the following pull (same asymmetry as plugins).
+	const exclude = [...(before.exclude ?? []), ...(after.exclude ?? [])];
+	return {
+		...after,
+		plugins: before.plugins && after.plugins,
+		...(exclude.length > 0 ? { exclude } : {}),
+	};
 }
 
 /**

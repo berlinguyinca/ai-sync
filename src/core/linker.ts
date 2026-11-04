@@ -14,6 +14,13 @@ export interface LinkResult {
 	backedUp: string[];
 }
 
+/** True when an exclude pattern is rooted inside the directory target (e.g. `skills/`). */
+function hasExcludeUnder(dirTarget: string, exclude: readonly string[] | undefined): boolean {
+	return (exclude ?? []).some((p) =>
+		p.replace(/^\//, "").toLowerCase().startsWith(dirTarget.toLowerCase()),
+	);
+}
+
 /**
  * Returns the list of sync targets that can be symlinked (no path rewriting needed).
  * Targets that require {{HOME}} path rewriting must stay as copies.
@@ -25,7 +32,8 @@ export function getLinkableTargets(env: Environment, options: AllowlistOptions =
 	for (const target of env.getSyncTargets()) {
 		// Directory targets never need path rewriting themselves
 		if (target.endsWith("/")) {
-			linkable.push(target);
+			// A directory symlink would expose excluded children, so keep it a copy.
+			if (!hasExcludeUnder(target, options.exclude)) linkable.push(target);
 			continue;
 		}
 		// File targets: skip if they need path rewriting

@@ -10,12 +10,22 @@ import { z } from "zod";
  * in every code path: nothing under `plugins/` is pushed, pulled, backed up,
  * diffed or deleted.
  *
+ * `exclude` (optional) is a list of glob patterns, relative to each environment's
+ * config root (e.g. `skills/autospec*` for `~/.claude/skills/autospec*`), that are
+ * never pushed, pulled, diffed or deleted. Same glob dialect as the built-in ignore
+ * patterns (see `isPathIgnored` in manifest.ts). NOTE: CLIs older than the release
+ * that added `exclude` reject a config containing it (strict schema); see
+ * docs/sync-config.md "Rollout order".
+ *
  * `verify` defaults to false. When true, `ai-sync pull` runs the read-only
  * verifier for each pulled environment after applying (see docs/verify.md).
  */
 export const SyncConfigSchema = z.strictObject({
 	plugins: z.boolean().default(true),
 	verify: z.boolean().default(false),
+	exclude: z
+		.array(z.string().refine((p) => p.trim().length > 0, { message: "must not be empty" }))
+		.optional(),
 });
 
 export type SyncConfig = z.infer<typeof SyncConfigSchema>;
@@ -55,7 +65,7 @@ export async function loadSyncConfig(syncRepoDir: string): Promise<SyncConfig> {
 	if (!result.success) {
 		const problems = result.error.issues.map((issue) => {
 			if (issue.code === "unrecognized_keys") {
-				return `unknown key(s) ${issue.keys.map((k) => `"${k}"`).join(", ")} (allowed: "plugins", "verify")`;
+				return `unknown key(s) ${issue.keys.map((k) => `"${k}"`).join(", ")} (allowed: "plugins", "verify", "exclude")`;
 			}
 			return `${issue.path.join(".") || "(root)"}: ${issue.message}`;
 		});
