@@ -1,6 +1,6 @@
 import * as path from "node:path";
 import { type Environment, isFragmentCapable } from "./environment.js";
-import { isPathAllowed, isPathIgnored } from "./manifest.js";
+import { isPathAllowed, isPathIgnored, PLUGIN_IGNORE_PATTERNS } from "./manifest.js";
 import type { AllowlistFn } from "./scanner.js";
 import type { SyncConfig } from "./sync-config.js";
 
@@ -18,18 +18,33 @@ export function getEffectivePluginPatterns(
 }
 
 /**
+ * Expands user `exclude` globs into ignore patterns. A pattern naming a path
+ * (contains "/" and does not end in "/") also excludes everything beneath it, so
+ * `skills/autospec*` covers `skills/autospec-run/SKILL.md`. Patterns without "/"
+ * already match any path segment, and trailing-slash patterns are directory patterns.
+ */
+export function expandExcludePatterns(exclude: readonly string[] | undefined): string[] {
+	const out: string[] = [];
+	for (const raw of exclude ?? []) {
+		out.push(raw);
+		if (!raw.endsWith("/") && raw.replace(/^\//, "").includes("/")) out.push(`${raw}/`);
+	}
+	return out;
+}
+
+/**
  * Creates an allowlist function for an environment's sync targets.
  */
 export function makeAllowlistFn(env: Environment, options: AllowlistOptions = {}): AllowlistFn {
 	const fragmentDirs = isFragmentCapable(env) ? env.getFragmentDirs() : [];
+	const ignorePatterns = [...env.getIgnorePatterns(), ...expandExcludePatterns(options.exclude)];
 	const allowed = (relativePath: string): boolean =>
 		isPathAllowed(
 			relativePath,
 			[...env.getSyncTargets(), ...fragmentDirs],
 			getEffectivePluginPatterns(env, options),
-			env.getIgnorePatterns(),
+			ignorePatterns,
 		);
-	const ignorePatterns = env.getIgnorePatterns();
 	return Object.assign(allowed, {
 		isIgnored: (relativePath: string): boolean => isPathIgnored(relativePath, ignorePatterns),
 		followExternalSymlinks: env.followExternalSymlinks?.() ?? true,
@@ -49,6 +64,12 @@ export function needsPathRewrite(relativePath: string, env: Environment): boolea
  * targets, with plugin patterns dropped when `plugins` is false.
  */
 export function makeDefaultAllowlistFn(options: AllowlistOptions = {}): AllowlistFn {
+	const ignorePatterns = [...PLUGIN_IGNORE_PATTERNS, ...expandExcludePatterns(options.exclude)];
 	return (relativePath: string): boolean =>
-		isPathAllowed(relativePath, undefined, options.plugins === false ? [] : undefined);
+		isPathAllowed(
+			relativePath,
+			undefined,
+			options.plugins === false ? [] : undefined,
+			ignorePatterns,
+		);
 }

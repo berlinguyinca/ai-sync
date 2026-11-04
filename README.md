@@ -368,7 +368,8 @@ See [`docs/merge-config.md`](docs/merge-config.md) for the full schema reference
 
 Claude Code plugin files (`plugins/cache`, `plugins/marketplaces`, ...) are synced by default.
 To stop syncing them, put `{ "plugins": false }` in `tools/sync-config.json` in your sync repo.
-Pull then never touches the local `plugins/` directory. See [`docs/sync-config.md`](docs/sync-config.md).
+Pull then never touches the local `plugins/` directory.
+To keep paths owned by another tool out of the sync (e.g. `{ "exclude": ["skills/autospec*"] }`, relative to the config root), use `exclude`; release the CLI to every host before adding it, because older CLIs reject the key. See [`docs/sync-config.md`](docs/sync-config.md).
 
 ### Reviewing pending merges
 
